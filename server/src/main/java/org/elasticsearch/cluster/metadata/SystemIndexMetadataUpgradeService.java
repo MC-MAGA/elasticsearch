@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster.metadata;
@@ -107,7 +108,7 @@ public class SystemIndexMetadataUpgradeService implements ClusterStateListener {
     }
 
     // package-private for testing
-    boolean isVisible(IndexMetadata indexMetadata) {
+    static boolean isVisible(IndexMetadata indexMetadata) {
         return indexMetadata.getSettings().getAsBoolean(IndexMetadata.SETTING_INDEX_HIDDEN, false) == false;
     }
 
@@ -118,7 +119,7 @@ public class SystemIndexMetadataUpgradeService implements ClusterStateListener {
     }
 
     // package-private for testing
-    boolean hasVisibleAlias(IndexMetadata indexMetadata) {
+    static boolean hasVisibleAlias(IndexMetadata indexMetadata) {
         return indexMetadata.getAliases().values().stream().anyMatch(a -> Boolean.FALSE.equals(a.isHidden()));
     }
 

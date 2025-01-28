@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.admin.cluster.migration;
@@ -48,7 +49,7 @@ public class GetFeatureUpgradeStatusResponse extends ActionResponse implements T
      */
     public GetFeatureUpgradeStatusResponse(StreamInput in) throws IOException {
         super(in);
-        this.featureUpgradeStatuses = in.readImmutableList(FeatureUpgradeStatus::new);
+        this.featureUpgradeStatuses = in.readCollectionAsImmutableList(FeatureUpgradeStatus::new);
         this.upgradeStatus = in.readEnum(UpgradeStatus.class);
     }
 
@@ -67,7 +68,7 @@ public class GetFeatureUpgradeStatusResponse extends ActionResponse implements T
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeList(this.featureUpgradeStatuses);
+        out.writeCollection(this.featureUpgradeStatuses);
         out.writeEnum(upgradeStatus);
     }
 
@@ -154,7 +155,7 @@ public class GetFeatureUpgradeStatusResponse extends ActionResponse implements T
             this.featureName = in.readString();
             this.minimumIndexVersion = IndexVersion.readVersion(in);
             this.upgradeStatus = in.readEnum(UpgradeStatus.class);
-            this.indexInfos = in.readImmutableList(IndexInfo::new);
+            this.indexInfos = in.readCollectionAsImmutableList(IndexInfo::new);
         }
 
         public String getFeatureName() {
@@ -178,14 +179,14 @@ public class GetFeatureUpgradeStatusResponse extends ActionResponse implements T
             out.writeString(this.featureName);
             IndexVersion.writeVersion(this.minimumIndexVersion, out);
             out.writeEnum(this.upgradeStatus);
-            out.writeList(this.indexInfos);
+            out.writeCollection(this.indexInfos);
         }
 
         @Override
         public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
             builder.startObject();
             builder.field("feature_name", this.featureName);
-            builder.field("minimum_index_version", this.minimumIndexVersion.toString());
+            builder.field("minimum_index_version", this.minimumIndexVersion.toReleaseVersion());
             builder.field("migration_status", this.upgradeStatus);
             builder.startArray("indices");
             for (IndexInfo version : this.indexInfos) {
@@ -300,7 +301,7 @@ public class GetFeatureUpgradeStatusResponse extends ActionResponse implements T
 
             builder.startObject();
             builder.field("index", this.indexName);
-            builder.field("version", this.version.toString());
+            builder.field("version", this.version.toReleaseVersion());
             if (exception != null) {
                 builder.startObject("failure_cause");
                 {

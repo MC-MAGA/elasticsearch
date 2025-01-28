@@ -1,14 +1,15 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster.metadata;
 
-import org.elasticsearch.TransportVersion;
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.action.admin.indices.rollover.RolloverConfiguration;
 import org.elasticsearch.cluster.SimpleDiffable;
 import org.elasticsearch.common.Strings;
@@ -42,21 +43,11 @@ import java.util.Objects;
  */
 public class Template implements SimpleDiffable<Template>, ToXContentObject {
 
-    // This represents when the data stream lifecycle was explicitly set to be null, meaning the user wants to remove the
-    // lifecycle.
-    public static final DataStreamLifecycle NO_LIFECYCLE = new DataStreamLifecycle() {
-
-        @Override
-        public XContentBuilder toXContent(XContentBuilder builder, Params params, RolloverConfiguration rolloverConfiguration)
-            throws IOException {
-            return builder.nullValue();
-        }
-    };
-
     private static final ParseField SETTINGS = new ParseField("settings");
     private static final ParseField MAPPINGS = new ParseField("mappings");
     private static final ParseField ALIASES = new ParseField("aliases");
     private static final ParseField LIFECYCLE = new ParseField("lifecycle");
+    private static final ParseField DATA_STREAM_OPTIONS = new ParseField("data_stream_options");
 
     @SuppressWarnings("unchecked")
     public static final ConstructingObjectParser<Template, Void> PARSER = new ConstructingObjectParser<>(
@@ -66,7 +57,8 @@ public class Template implements SimpleDiffable<Template>, ToXContentObject {
             (Settings) a[0],
             (CompressedXContent) a[1],
             (Map<String, AliasMetadata>) a[2],
-            DataStreamLifecycle.isFeatureEnabled() ? (DataStreamLifecycle) a[3] : null
+            (DataStreamLifecycle) a[3],
+            a[4] == null ? ResettableValue.undefined() : (ResettableValue<DataStreamOptions.Template>) a[4]
         )
     );
 
@@ -86,21 +78,23 @@ public class Template implements SimpleDiffable<Template>, ToXContentObject {
         }, MAPPINGS, ObjectParser.ValueType.VALUE_OBJECT_ARRAY);
         PARSER.declareObject(ConstructingObjectParser.optionalConstructorArg(), (p, c) -> {
             Map<String, AliasMetadata> aliasMap = new HashMap<>();
-            while ((p.nextToken()) != XContentParser.Token.END_OBJECT) {
+            XContentParser.Token token;
+            while ((token = p.nextToken()) != XContentParser.Token.END_OBJECT) {
+                if (token == null) {
+                    break;
+                }
                 AliasMetadata alias = AliasMetadata.Builder.fromXContent(p);
                 aliasMap.put(alias.alias(), alias);
             }
             return aliasMap;
         }, ALIASES);
-        // We adjust the parser to ensure that the error message will be consistent with that of an unknown field.
-        if (DataStreamLifecycle.isFeatureEnabled()) {
-            PARSER.declareObjectOrNull(
-                ConstructingObjectParser.optionalConstructorArg(),
-                (p, c) -> DataStreamLifecycle.fromXContent(p),
-                NO_LIFECYCLE,
-                LIFECYCLE
-            );
-        }
+        PARSER.declareObject(ConstructingObjectParser.optionalConstructorArg(), (p, c) -> DataStreamLifecycle.fromXContent(p), LIFECYCLE);
+        PARSER.declareObjectOrNull(
+            ConstructingObjectParser.optionalConstructorArg(),
+            (p, c) -> ResettableValue.create(DataStreamOptions.Template.fromXContent(p)),
+            ResettableValue.reset(),
+            DATA_STREAM_OPTIONS
+        );
     }
 
     @Nullable
@@ -112,25 +106,25 @@ public class Template implements SimpleDiffable<Template>, ToXContentObject {
 
     @Nullable
     private final DataStreamLifecycle lifecycle;
+    private final ResettableValue<DataStreamOptions.Template> dataStreamOptions;
 
     public Template(
         @Nullable Settings settings,
         @Nullable CompressedXContent mappings,
         @Nullable Map<String, AliasMetadata> aliases,
-        @Nullable DataStreamLifecycle lifecycle
+        @Nullable DataStreamLifecycle lifecycle,
+        ResettableValue<DataStreamOptions.Template> dataStreamOptions
     ) {
         this.settings = settings;
         this.mappings = mappings;
         this.aliases = aliases;
-        if (DataStreamLifecycle.isFeatureEnabled()) {
-            this.lifecycle = lifecycle;
-        } else {
-            this.lifecycle = null;
-        }
+        this.lifecycle = lifecycle;
+        assert dataStreamOptions != null : "Template does not accept null values, please use Resettable.undefined()";
+        this.dataStreamOptions = dataStreamOptions;
     }
 
     public Template(@Nullable Settings settings, @Nullable CompressedXContent mappings, @Nullable Map<String, AliasMetadata> aliases) {
-        this(settings, mappings, aliases, null);
+        this(settings, mappings, aliases, null, ResettableValue.undefined());
     }
 
     public Template(StreamInput in) throws IOException {
@@ -149,15 +143,23 @@ public class Template implements SimpleDiffable<Template>, ToXContentObject {
         } else {
             this.aliases = null;
         }
-        if (in.getTransportVersion().onOrAfter(TransportVersion.V_8_500_010)) {
+        if (in.getTransportVersion().onOrAfter(DataStreamLifecycle.ADDED_ENABLED_FLAG_VERSION)) {
+            this.lifecycle = in.readOptionalWriteable(DataStreamLifecycle::new);
+        } else if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_9_X)) {
             boolean isExplicitNull = in.readBoolean();
             if (isExplicitNull) {
-                this.lifecycle = NO_LIFECYCLE;
+                this.lifecycle = DataStreamLifecycle.newBuilder().enabled(false).build();
             } else {
                 this.lifecycle = in.readOptionalWriteable(DataStreamLifecycle::new);
             }
         } else {
             this.lifecycle = null;
+        }
+        if (in.getTransportVersion().onOrAfter(TransportVersions.ADD_DATA_STREAM_OPTIONS_TO_TEMPLATES)) {
+            dataStreamOptions = ResettableValue.read(in, DataStreamOptions.Template::read);
+        } else {
+            // We default to no data stream options since failure store is behind a feature flag up to this version
+            this.dataStreamOptions = ResettableValue.undefined();
         }
     }
 
@@ -181,6 +183,15 @@ public class Template implements SimpleDiffable<Template>, ToXContentObject {
         return lifecycle;
     }
 
+    @Nullable
+    public DataStreamOptions.Template dataStreamOptions() {
+        return dataStreamOptions.get();
+    }
+
+    public ResettableValue<DataStreamOptions.Template> resettableDataStreamOptions() {
+        return dataStreamOptions;
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         if (this.settings == null) {
@@ -199,20 +210,25 @@ public class Template implements SimpleDiffable<Template>, ToXContentObject {
             out.writeBoolean(false);
         } else {
             out.writeBoolean(true);
-            out.writeMap(this.aliases, StreamOutput::writeString, (stream, aliasMetadata) -> aliasMetadata.writeTo(stream));
+            out.writeMap(this.aliases, StreamOutput::writeWriteable);
         }
-        if (out.getTransportVersion().onOrAfter(TransportVersion.V_8_500_010)) {
-            boolean isExplicitNull = lifecycle == NO_LIFECYCLE;
+        if (out.getTransportVersion().onOrAfter(DataStreamLifecycle.ADDED_ENABLED_FLAG_VERSION)) {
+            out.writeOptionalWriteable(lifecycle);
+        } else if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_9_X)) {
+            boolean isExplicitNull = lifecycle != null && lifecycle.isEnabled() == false;
             out.writeBoolean(isExplicitNull);
             if (isExplicitNull == false) {
                 out.writeOptionalWriteable(lifecycle);
             }
         }
+        if (out.getTransportVersion().onOrAfter(TransportVersions.ADD_DATA_STREAM_OPTIONS_TO_TEMPLATES)) {
+            ResettableValue.write(out, dataStreamOptions, (o, v) -> v.writeTo(o));
+        }
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(settings, mappings, aliases, lifecycle);
+        return Objects.hash(settings, mappings, aliases, lifecycle, dataStreamOptions);
     }
 
     @Override
@@ -227,7 +243,8 @@ public class Template implements SimpleDiffable<Template>, ToXContentObject {
         return Objects.equals(settings, other.settings)
             && mappingsEquals(this.mappings, other.mappings)
             && Objects.equals(aliases, other.aliases)
-            && Objects.equals(lifecycle, other.lifecycle);
+            && Objects.equals(lifecycle, other.lifecycle)
+            && Objects.equals(dataStreamOptions, other.dataStreamOptions);
     }
 
     @Override
@@ -241,7 +258,9 @@ public class Template implements SimpleDiffable<Template>, ToXContentObject {
     }
 
     /**
-     * Converts the template to XContent and passes the RolloverConditions, when provided, to the lifecycle.
+     * Converts the template to XContent and passes the RolloverConditions, when provided, to the lifecycle. Depending on the
+     * {@param params} set by {@link ResettableValue#hideResetValues(Params)} it may or may not display <code>null</code> when the value
+     * is to be reset.
      */
     public XContentBuilder toXContent(XContentBuilder builder, Params params, @Nullable RolloverConfiguration rolloverConfiguration)
         throws IOException {
@@ -274,7 +293,10 @@ public class Template implements SimpleDiffable<Template>, ToXContentObject {
         }
         if (this.lifecycle != null) {
             builder.field(LIFECYCLE.getPreferredName());
-            lifecycle.toXContent(builder, params, rolloverConfiguration);
+            lifecycle.toXContent(builder, params, rolloverConfiguration, null, false);
+        }
+        if (DataStream.isFailureStoreFeatureFlagEnabled()) {
+            dataStreamOptions.toXContent(builder, params, DATA_STREAM_OPTIONS.getPreferredName());
         }
         builder.endObject();
         return builder;
@@ -309,5 +331,78 @@ public class Template implements SimpleDiffable<Template>, ToXContentObject {
             XContentHelper.convertToMap(m2.uncompressed(), true, XContentType.JSON).v2()
         );
         return Maps.deepEquals(thisUncompressedMapping, otherUncompressedMapping);
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static Builder builder(@Nullable Template template) {
+        return template == null ? new Builder() : new Builder(template);
+    }
+
+    public static class Builder {
+        private Settings settings = null;
+        private CompressedXContent mappings = null;
+        private Map<String, AliasMetadata> aliases = null;
+        private DataStreamLifecycle lifecycle = null;
+        private ResettableValue<DataStreamOptions.Template> dataStreamOptions = ResettableValue.undefined();
+
+        private Builder() {}
+
+        private Builder(Template template) {
+            settings = template.settings;
+            mappings = template.mappings;
+            aliases = template.aliases;
+            lifecycle = template.lifecycle;
+            dataStreamOptions = template.dataStreamOptions;
+        }
+
+        public Builder settings(Settings settings) {
+            this.settings = settings;
+            return this;
+        }
+
+        public Builder settings(Settings.Builder settings) {
+            this.settings = settings.build();
+            return this;
+        }
+
+        public Builder mappings(CompressedXContent mappings) {
+            this.mappings = mappings;
+            return this;
+        }
+
+        public Builder aliases(Map<String, AliasMetadata> aliases) {
+            this.aliases = aliases;
+            return this;
+        }
+
+        public Builder lifecycle(DataStreamLifecycle lifecycle) {
+            this.lifecycle = lifecycle;
+            return this;
+        }
+
+        public Builder lifecycle(DataStreamLifecycle.Builder lifecycle) {
+            this.lifecycle = lifecycle.build();
+            return this;
+        }
+
+        /**
+         * When the value passed is null it considers the value as undefined.
+         */
+        public Builder dataStreamOptions(@Nullable DataStreamOptions.Template dataStreamOptions) {
+            this.dataStreamOptions = ResettableValue.create(dataStreamOptions);
+            return this;
+        }
+
+        public Builder dataStreamOptions(ResettableValue<DataStreamOptions.Template> dataStreamOptions) {
+            this.dataStreamOptions = dataStreamOptions;
+            return this;
+        }
+
+        public Template build() {
+            return new Template(settings, mappings, aliases, lifecycle, dataStreamOptions);
+        }
     }
 }

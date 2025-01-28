@@ -1,17 +1,18 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.fieldcaps;
 
 import org.elasticsearch.TransportVersion;
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.action.support.ActionFilter;
 import org.elasticsearch.action.support.ActionFilters;
-import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.cluster.node.VersionInformation;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.io.stream.StreamOutput;
@@ -21,6 +22,7 @@ import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.search.DummyQueryBuilder;
 import org.elasticsearch.search.SearchService;
 import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.test.TransportVersionUtils;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.threadpool.TestThreadPool;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -43,18 +45,19 @@ public class TransportFieldCapabilitiesActionTests extends ESTestCase {
         ThreadPool.terminate(threadPool, 10, TimeUnit.SECONDS);
     }
 
-    public void testCCSCompatibilityCheck() throws Exception {
+    public void testCCSCompatibilityCheck() {
         Settings settings = Settings.builder()
             .put("node.name", TransportFieldCapabilitiesActionTests.class.getSimpleName())
             .put(SearchService.CCS_VERSION_CHECK_SETTING.getKey(), "true")
             .build();
         ActionFilters actionFilters = mock(ActionFilters.class);
         when(actionFilters.filters()).thenReturn(new ActionFilter[0]);
+        TransportVersion transportVersion = TransportVersionUtils.getNextVersion(TransportVersions.MINIMUM_CCS_VERSION, true);
         try {
             TransportService transportService = MockTransportService.createNewService(
                 Settings.EMPTY,
                 VersionInformation.CURRENT,
-                TransportVersion.current(),
+                transportVersion,
                 threadPool
             );
 
@@ -62,10 +65,8 @@ public class TransportFieldCapabilitiesActionTests extends ESTestCase {
             fieldCapsRequest.indexFilter(new DummyQueryBuilder() {
                 @Override
                 protected void doWriteTo(StreamOutput out) throws IOException {
-                    if (out.getTransportVersion().before(TransportVersion.current())) {
-                        throw new IllegalArgumentException(
-                            "This query isn't serializable before transport version " + TransportVersion.current()
-                        );
+                    if (out.getTransportVersion().before(transportVersion)) {
+                        throw new IllegalArgumentException("This query isn't serializable before transport version " + transportVersion);
                     }
                 }
             });
@@ -86,13 +87,10 @@ public class TransportFieldCapabilitiesActionTests extends ESTestCase {
                 null
             );
 
-            IllegalArgumentException ex = expectThrows(
+            IllegalArgumentException ex = safeAwaitFailure(
                 IllegalArgumentException.class,
-                () -> PlainActionFuture.<FieldCapabilitiesResponse, RuntimeException>get(
-                    future -> action.doExecute(null, fieldCapsRequest, future),
-                    10,
-                    TimeUnit.SECONDS
-                )
+                FieldCapabilitiesResponse.class,
+                l -> action.doExecute(null, fieldCapsRequest, l)
             );
 
             assertThat(
@@ -100,10 +98,7 @@ public class TransportFieldCapabilitiesActionTests extends ESTestCase {
                 containsString("[class org.elasticsearch.action.fieldcaps.FieldCapabilitiesRequest] is not compatible with version")
             );
             assertThat(ex.getMessage(), containsString("and the 'search.check_ccs_compatibility' setting is enabled."));
-            assertEquals(
-                "This query isn't serializable before transport version " + TransportVersion.current(),
-                ex.getCause().getMessage()
-            );
+            assertEquals("This query isn't serializable before transport version " + transportVersion, ex.getCause().getMessage());
         } finally {
             assertTrue(ESTestCase.terminate(threadPool));
         }

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.support.replication;
@@ -21,6 +22,7 @@ import org.elasticsearch.cluster.routing.RecoverySource;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.UnassignedInfo;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.index.engine.DocIdSeqNoAndSource;
@@ -31,7 +33,6 @@ import org.elasticsearch.index.shard.IndexShardTestCase;
 import org.elasticsearch.index.shard.ReplicationGroup;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.test.transport.MockTransportService;
-import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
 import java.io.IOException;
@@ -67,7 +68,7 @@ public class PostWriteRefreshTests extends IndexShardTestCase {
         transportService.acceptIncomingRequests();
         transportService.registerRequestHandler(
             TransportUnpromotableShardRefreshAction.NAME,
-            ThreadPool.Names.SAME,
+            EsExecutors.DIRECT_EXECUTOR_SERVICE,
             UnpromotableShardRefreshRequest::new,
             (request, channel, task) -> {
                 unpromotableRefreshRequestReceived.set(true);
@@ -89,7 +90,7 @@ public class PostWriteRefreshTests extends IndexShardTestCase {
         try {
             String id = "0";
             Engine.IndexResult result = indexDoc(primary, "_doc", id);
-            PlainActionFuture<Boolean> f = PlainActionFuture.newFuture();
+            PlainActionFuture<Boolean> f = new PlainActionFuture<>();
             PostWriteRefresh postWriteRefresh = new PostWriteRefresh(transportService);
             postWriteRefresh.refreshShard(
                 WriteRequest.RefreshPolicy.WAIT_UNTIL,
@@ -114,7 +115,7 @@ public class PostWriteRefreshTests extends IndexShardTestCase {
         try {
             String id = "0";
             Engine.IndexResult result = indexDoc(primary, "_doc", id);
-            PlainActionFuture<Boolean> f = PlainActionFuture.newFuture();
+            PlainActionFuture<Boolean> f = new PlainActionFuture<>();
             PostWriteRefresh postWriteRefresh = new PostWriteRefresh(transportService);
             postWriteRefresh.refreshShard(
                 WriteRequest.RefreshPolicy.IMMEDIATE,
@@ -138,7 +139,7 @@ public class PostWriteRefreshTests extends IndexShardTestCase {
         try {
             String id = "0";
             Engine.IndexResult result = indexDoc(primary, "_doc", id);
-            PlainActionFuture<Boolean> f = PlainActionFuture.newFuture();
+            PlainActionFuture<Boolean> f = new PlainActionFuture<>();
             PostWriteRefresh postWriteRefresh = new PostWriteRefresh(transportService);
 
             ReplicationGroup replicationGroup = mock(ReplicationGroup.class);
@@ -161,7 +162,7 @@ public class PostWriteRefreshTests extends IndexShardTestCase {
                 new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED, "message"),
                 ShardRouting.Role.SEARCH_ONLY
             );
-            when(routingTable.unpromotableShards()).thenReturn(List.of(shardRouting));
+            when(routingTable.allUnpromotableShards()).thenReturn(List.of(shardRouting));
             when(routingTable.shardId()).thenReturn(shardId);
             WriteRequest.RefreshPolicy policy = randomFrom(WriteRequest.RefreshPolicy.IMMEDIATE, WriteRequest.RefreshPolicy.WAIT_UNTIL);
             postWriteRefresh.refreshShard(policy, primary, result.getTranslogLocation(), f, postWriteRefreshTimeout);
@@ -188,7 +189,7 @@ public class PostWriteRefreshTests extends IndexShardTestCase {
         try {
             String id = "0";
             Engine.IndexResult result = indexDoc(replica, "_doc", id);
-            PlainActionFuture<Boolean> f = PlainActionFuture.newFuture();
+            PlainActionFuture<Boolean> f = new PlainActionFuture<>();
             PostWriteRefresh.refreshReplicaShard(WriteRequest.RefreshPolicy.WAIT_UNTIL, replica, result.getTranslogLocation(), f);
             Releasable releasable = simulateScheduledRefresh(replica, false);
             f.actionGet();
@@ -207,7 +208,7 @@ public class PostWriteRefreshTests extends IndexShardTestCase {
         try {
             String id = "0";
             Engine.IndexResult result = indexDoc(replica, "_doc", id);
-            PlainActionFuture<Boolean> f = PlainActionFuture.newFuture();
+            PlainActionFuture<Boolean> f = new PlainActionFuture<>();
             PostWriteRefresh.refreshReplicaShard(WriteRequest.RefreshPolicy.IMMEDIATE, replica, result.getTranslogLocation(), f);
             f.actionGet();
             assertEngineContainsIdNoRefresh(replica, id);
@@ -221,7 +222,7 @@ public class PostWriteRefreshTests extends IndexShardTestCase {
         recoverShardFromStore(primary);
         ReplicationGroup realReplicationGroup = primary.getReplicationGroup();
         try {
-            PlainActionFuture<Boolean> f = PlainActionFuture.newFuture();
+            PlainActionFuture<Boolean> f = new PlainActionFuture<>();
             PostWriteRefresh postWriteRefresh = new PostWriteRefresh(transportService);
 
             ReplicationGroup replicationGroup = mock(ReplicationGroup.class);
@@ -237,9 +238,9 @@ public class PostWriteRefreshTests extends IndexShardTestCase {
             );
             // Randomly test scenarios with and without unpromotables
             if (randomBoolean()) {
-                when(routingTable.unpromotableShards()).thenReturn(Collections.emptyList());
+                when(routingTable.allUnpromotableShards()).thenReturn(Collections.emptyList());
             } else {
-                when(routingTable.unpromotableShards()).thenReturn(List.of(shardRouting));
+                when(routingTable.allUnpromotableShards()).thenReturn(List.of(shardRouting));
             }
             WriteRequest.RefreshPolicy policy = WriteRequest.RefreshPolicy.WAIT_UNTIL;
             postWriteRefresh.refreshShard(policy, primary, null, f, postWriteRefreshTimeout);

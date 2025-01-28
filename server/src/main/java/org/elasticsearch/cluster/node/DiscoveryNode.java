@@ -1,14 +1,16 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster.node;
 
 import org.elasticsearch.TransportVersion;
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.UUIDs;
@@ -19,6 +21,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.util.StringLiteralDeduplicator;
 import org.elasticsearch.core.Nullable;
+import org.elasticsearch.env.BuildVersion;
 import org.elasticsearch.index.IndexVersion;
 import org.elasticsearch.node.Node;
 import org.elasticsearch.xcontent.ToXContentFragment;
@@ -34,6 +37,7 @@ import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
+import static org.elasticsearch.TransportVersions.NODE_VERSION_INFORMATION_WITH_MIN_READ_ONLY_INDEX_VERSION;
 import static org.elasticsearch.node.NodeRoleSettings.NODE_ROLES_SETTING;
 
 /**
@@ -57,18 +61,8 @@ public class DiscoveryNode implements Writeable, ToXContentFragment {
         return settings.getAsBoolean(STATELESS_ENABLED_SETTING_NAME, false);
     }
 
-    /**
-     * Check if the serverless feature flag is present and set to {@code true}, indicating that the node is
-     * part of a serverless deployment.
-     *
-     * @return true if the serverless feature flag is present and set
-     */
-    public static boolean isServerless() {
-        return DiscoveryNodeRole.hasServerlessFeatureFlag();
-    }
-
     static final String COORDINATING_ONLY = "coordinating_only";
-    public static final TransportVersion EXTERNAL_ID_VERSION = TransportVersion.V_8_3_0;
+    public static final TransportVersion EXTERNAL_ID_VERSION = TransportVersions.V_8_3_0;
     public static final Comparator<DiscoveryNode> DISCOVERY_NODE_COMPARATOR = Comparator.comparing(DiscoveryNode::getName)
         .thenComparing(DiscoveryNode::getId);
 
@@ -296,18 +290,6 @@ public class DiscoveryNode implements Writeable, ToXContentFragment {
         return Set.copyOf(NODE_ROLES_SETTING.get(settings));
     }
 
-    private static VersionInformation inferVersionInformation(Version version) {
-        if (version.before(Version.V_8_10_0)) {
-            return new VersionInformation(
-                version,
-                IndexVersion.fromId(version.minimumIndexCompatibilityVersion().id),
-                IndexVersion.fromId(version.id)
-            );
-        } else {
-            return new VersionInformation(version, IndexVersion.MINIMUM_COMPATIBLE, IndexVersion.current());
-        }
-    }
-
     private static final Writeable.Reader<String> readStringLiteral = s -> nodeStringDeduplicator.deduplicate(s.readString());
 
     /**
@@ -344,11 +326,17 @@ public class DiscoveryNode implements Writeable, ToXContentFragment {
             }
         }
         this.roles = Collections.unmodifiableSortedSet(roles);
-        if (in.getTransportVersion().onOrAfter(TransportVersion.V_8_500_024)) {
-            versionInfo = new VersionInformation(Version.readVersion(in), IndexVersion.readVersion(in), IndexVersion.readVersion(in));
+        Version version = Version.readVersion(in);
+        IndexVersion minIndexVersion = IndexVersion.readVersion(in);
+        IndexVersion minReadOnlyIndexVersion;
+        if (in.getTransportVersion().onOrAfter(NODE_VERSION_INFORMATION_WITH_MIN_READ_ONLY_INDEX_VERSION)) {
+            minReadOnlyIndexVersion = IndexVersion.readVersion(in);
         } else {
-            versionInfo = inferVersionInformation(Version.readVersion(in));
+            minReadOnlyIndexVersion = minIndexVersion;
+
         }
+        IndexVersion maxIndexVersion = IndexVersion.readVersion(in);
+        versionInfo = new VersionInformation(version, minIndexVersion, minReadOnlyIndexVersion, maxIndexVersion);
         if (in.getTransportVersion().onOrAfter(EXTERNAL_ID_VERSION)) {
             this.externalId = readStringLiteral.read(in);
         } else {
@@ -375,19 +363,18 @@ public class DiscoveryNode implements Writeable, ToXContentFragment {
         out.writeString(hostName);
         out.writeString(hostAddress);
         address.writeTo(out);
-        out.writeMap(attributes, StreamOutput::writeString, StreamOutput::writeString);
+        out.writeMap(attributes, StreamOutput::writeString);
         out.writeCollection(roles, (o, role) -> {
             o.writeString(role.roleName());
             o.writeString(role.roleNameAbbreviation());
             o.writeBoolean(role.canContainData());
         });
-        if (out.getTransportVersion().onOrAfter(TransportVersion.V_8_500_024)) {
-            Version.writeVersion(versionInfo.nodeVersion(), out);
-            IndexVersion.writeVersion(versionInfo.minIndexVersion(), out);
-            IndexVersion.writeVersion(versionInfo.maxIndexVersion(), out);
-        } else {
-            Version.writeVersion(versionInfo.nodeVersion(), out);
+        Version.writeVersion(versionInfo.nodeVersion(), out);
+        IndexVersion.writeVersion(versionInfo.minIndexVersion(), out);
+        if (out.getTransportVersion().onOrAfter(NODE_VERSION_INFORMATION_WITH_MIN_READ_ONLY_INDEX_VERSION)) {
+            IndexVersion.writeVersion(versionInfo.minReadOnlyIndexVersion(), out);
         }
+        IndexVersion.writeVersion(versionInfo.maxIndexVersion(), out);
         if (out.getTransportVersion().onOrAfter(EXTERNAL_ID_VERSION)) {
             out.writeString(externalId);
         }
@@ -492,12 +479,21 @@ public class DiscoveryNode implements Writeable, ToXContentFragment {
         return this.versionInfo;
     }
 
+    public BuildVersion getBuildVersion() {
+        return versionInfo.buildVersion();
+    }
+
+    @Deprecated
     public Version getVersion() {
         return this.versionInfo.nodeVersion();
     }
 
     public IndexVersion getMinIndexVersion() {
         return versionInfo.minIndexVersion();
+    }
+
+    public IndexVersion getMinReadOnlyIndexVersion() {
+        return versionInfo.minReadOnlyIndexVersion();
     }
 
     public IndexVersion getMaxIndexVersion() {
@@ -560,7 +556,7 @@ public class DiscoveryNode implements Writeable, ToXContentFragment {
             appendRoleAbbreviations(stringBuilder, "");
             stringBuilder.append('}');
         }
-        stringBuilder.append('{').append(versionInfo.nodeVersion()).append('}');
+        stringBuilder.append('{').append(versionInfo.buildVersion()).append('}');
         stringBuilder.append('{').append(versionInfo.minIndexVersion()).append('-').append(versionInfo.maxIndexVersion()).append('}');
     }
 
@@ -597,7 +593,7 @@ public class DiscoveryNode implements Writeable, ToXContentFragment {
             builder.value(role.roleName());
         }
         builder.endArray();
-        builder.field("version", versionInfo.nodeVersion());
+        builder.field("version", versionInfo.buildVersion().toString());
         builder.field("min_index_version", versionInfo.minIndexVersion());
         builder.field("max_index_version", versionInfo.maxIndexVersion());
         builder.endObject();

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search.aggregations.support;
@@ -70,7 +71,7 @@ public class TimeSeriesIndexSearcher {
             throw new RuntimeException(e);
         }
         this.cancellations = cancellations;
-        cancellations.forEach(cancellation -> this.searcher.addQueryCancellation(cancellation));
+        cancellations.forEach(this.searcher::addQueryCancellation);
 
         assert TIME_SERIES_SORT.length == 2;
         assert TIME_SERIES_SORT[0].getField().equals(TimeSeriesIdFieldMapper.NAME);
@@ -84,9 +85,14 @@ public class TimeSeriesIndexSearcher {
     }
 
     public void search(Query query, BucketCollector bucketCollector) throws IOException {
-        int seen = 0;
         query = searcher.rewrite(query);
         Weight weight = searcher.createWeight(query, bucketCollector.scoreMode(), 1);
+        search(bucketCollector, weight);
+        bucketCollector.postCollection();
+    }
+
+    private void search(BucketCollector bucketCollector, Weight weight) throws IOException {
+        int seen = 0;
         int[] tsidOrd = new int[1];
 
         // Create LeafWalker for each subreader
@@ -98,7 +104,7 @@ public class TimeSeriesIndexSearcher {
             Scorer scorer = weight.scorer(leaf);
             if (scorer != null) {
                 if (minimumScore != null) {
-                    scorer = new MinScoreScorer(weight, scorer, minimumScore);
+                    scorer = new MinScoreScorer(scorer, minimumScore);
                 }
                 LeafWalker leafWalker = new LeafWalker(leaf, scorer, bucketCollector, () -> tsidOrd[0]);
                 if (leafWalker.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
@@ -208,8 +214,6 @@ public class TimeSeriesIndexSearcher {
         private final SortedNumericDocValues timestamps;    // TODO can we have this just a NumericDocValues?
         private final BytesRefBuilder scratch = new BytesRefBuilder();
 
-        private final Scorer scorer;
-
         int docId = -1;
         int tsidOrd;
         long timestamp;
@@ -220,7 +224,6 @@ public class TimeSeriesIndexSearcher {
             this.collector = bucketCollector.getLeafCollector(aggCtx);
             liveDocs = context.reader().getLiveDocs();
             this.collector.setScorer(scorer);
-            this.scorer = scorer;
             iterator = scorer.iterator();
             tsids = DocValues.getSorted(context.reader(), TimeSeriesIdFieldMapper.NAME);
             timestamps = DocValues.getSortedNumeric(context.reader(), DataStream.TIMESTAMP_FIELD_NAME);

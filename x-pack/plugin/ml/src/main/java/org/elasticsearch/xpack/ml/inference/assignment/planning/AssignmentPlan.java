@@ -10,6 +10,8 @@ package org.elasticsearch.xpack.ml.inference.assignment.planning;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.util.Maps;
 import org.elasticsearch.core.Tuple;
+import org.elasticsearch.xpack.core.ml.action.StartTrainedModelDeploymentAction;
+import org.elasticsearch.xpack.core.ml.inference.assignment.AdaptiveAllocationsSettings;
 import org.elasticsearch.xpack.core.ml.inference.assignment.Priority;
 
 import java.util.ArrayList;
@@ -29,25 +31,59 @@ import java.util.stream.Collectors;
  */
 public class AssignmentPlan implements Comparable<AssignmentPlan> {
 
+    /**
+     *
+     * @param deploymentId
+     * @param memoryBytes
+     * @param allocations
+     * @param threadsPerAllocation
+     * @param currentAllocationsByNodeId
+     * @param maxAssignedAllocations this value is used by the ZoneAwareAssignmentPlan and AssignmentPlanner to keep track of the
+     *                               maximum number of allocations which have been assigned. It is mainly for assigning over AZs.
+     * @param adaptiveAllocationsSettings
+     * @param priority
+     * @param perDeploymentMemoryBytes
+     * @param perAllocationMemoryBytes
+     */
     public record Deployment(
-        String id,
+        String deploymentId,
         long memoryBytes,
         int allocations,
         int threadsPerAllocation,
         Map<String, Integer> currentAllocationsByNodeId,
         int maxAssignedAllocations,
-        Priority priority
+        AdaptiveAllocationsSettings adaptiveAllocationsSettings,
+        Priority priority,
+        long perDeploymentMemoryBytes,
+        long perAllocationMemoryBytes
     ) {
-
         public Deployment(
-            String id,
-            long memoryBytes,
+            String deploymentId,
+            long modelBytes,
             int allocations,
             int threadsPerAllocation,
             Map<String, Integer> currentAllocationsByNodeId,
-            int maxAssignedAllocations
+            int maxAssignedAllocations,
+            AdaptiveAllocationsSettings adaptiveAllocationsSettings,
+            long perDeploymentMemoryBytes,
+            long perAllocationMemoryBytes
         ) {
-            this(id, memoryBytes, allocations, threadsPerAllocation, currentAllocationsByNodeId, maxAssignedAllocations, Priority.NORMAL);
+            this(
+                deploymentId,
+                modelBytes,
+                allocations,
+                threadsPerAllocation,
+                currentAllocationsByNodeId,
+                maxAssignedAllocations,
+                adaptiveAllocationsSettings,
+                Priority.NORMAL,
+                perDeploymentMemoryBytes,
+                perAllocationMemoryBytes
+            );
+        }
+
+        public AdaptiveAllocationsSettings getAdaptiveAllocationsSettings() {
+            return adaptiveAllocationsSettings;
         }
 
         int getCurrentAssignedAllocations() {
@@ -58,9 +94,63 @@ public class AssignmentPlan implements Comparable<AssignmentPlan> {
             return maxAssignedAllocations > 0;
         }
 
+        public long estimateMemoryUsageBytes(int allocations) {
+            return StartTrainedModelDeploymentAction.estimateMemoryUsageBytes(
+                deploymentId,
+                memoryBytes,
+                perDeploymentMemoryBytes,
+                perAllocationMemoryBytes,
+                allocations
+            );
+        }
+
+        long estimateAdditionalMemoryUsageBytes(int allocationsOld, int allocationsNew) {
+            return StartTrainedModelDeploymentAction.estimateMemoryUsageBytes(
+                deploymentId,
+                memoryBytes,
+                perDeploymentMemoryBytes,
+                perAllocationMemoryBytes,
+                allocationsNew
+            ) - StartTrainedModelDeploymentAction.estimateMemoryUsageBytes(
+                deploymentId,
+                memoryBytes,
+                perDeploymentMemoryBytes,
+                perAllocationMemoryBytes,
+                allocationsOld
+            );
+
+        }
+
+        long minimumMemoryRequiredBytes() {
+            return StartTrainedModelDeploymentAction.estimateMemoryUsageBytes(
+                deploymentId,
+                memoryBytes,
+                perDeploymentMemoryBytes,
+                perAllocationMemoryBytes,
+                1
+            );
+        }
+
+        int findOptimalAllocations(int maxAllocations, long availableMemoryBytes) {
+            if (perDeploymentMemoryBytes > 0 && perAllocationMemoryBytes > 0) {
+                return (int) Math.max(
+                    Math.min(maxAllocations, Math.floorDiv(availableMemoryBytes - estimateMemoryUsageBytes(0), perAllocationMemoryBytes)),
+                    0
+                );
+            }
+            return maxAllocations;
+        }
+
+        int findExcessAllocations(int maxAllocations, long availableMemoryBytes) {
+            if (perDeploymentMemoryBytes > 0 && perAllocationMemoryBytes > 0) {
+                return (int) Math.min(maxAllocations, Math.floorDiv(availableMemoryBytes, perAllocationMemoryBytes));
+            }
+            return maxAllocations;
+        }
+
         @Override
         public String toString() {
-            return id
+            return deploymentId
                 + " (mem = "
                 + ByteSizeValue.ofBytes(memoryBytes)
                 + ") (allocations = "
@@ -71,6 +161,8 @@ public class AssignmentPlan implements Comparable<AssignmentPlan> {
                 + currentAllocationsByNodeId
                 + ") (max_assigned_allocations = "
                 + maxAssignedAllocations
+                + ") (memory_usage = "
+                + ByteSizeValue.ofBytes(estimateMemoryUsageBytes(allocations))
                 + ")";
         }
     };
@@ -108,7 +200,7 @@ public class AssignmentPlan implements Comparable<AssignmentPlan> {
         this.remainingModelAllocations = Objects.requireNonNull(remainingModelAllocations);
     }
 
-    public Set<Deployment> models() {
+    public Set<Deployment> deployments() {
         return assignments.keySet();
     }
 
@@ -130,7 +222,7 @@ public class AssignmentPlan implements Comparable<AssignmentPlan> {
     }
 
     public boolean satisfiesCurrentAssignments() {
-        return models().stream().allMatch(this::isSatisfyingCurrentAssignmentsForModel);
+        return deployments().stream().allMatch(this::isSatisfyingCurrentAssignmentsForModel);
     }
 
     private boolean isSatisfyingCurrentAssignmentsForModel(Deployment m) {
@@ -147,18 +239,18 @@ public class AssignmentPlan implements Comparable<AssignmentPlan> {
     }
 
     public boolean satisfiesAllModels() {
-        return models().stream().allMatch(this::satisfiesAllocations);
+        return deployments().stream().allMatch(this::satisfiesAllocations);
     }
 
     public boolean arePreviouslyAssignedModelsAssigned() {
-        return models().stream()
+        return deployments().stream()
             .filter(Deployment::hasEverBeenAllocated)
             .map(this::totalAllocations)
             .allMatch(totalAllocations -> totalAllocations > 0);
     }
 
     public long countPreviouslyAssignedModelsThatAreStillAssigned() {
-        return models().stream()
+        return deployments().stream()
             .filter(Deployment::hasEverBeenAllocated)
             .map(this::totalAllocations)
             .filter(totalAllocations -> totalAllocations > 0)
@@ -223,11 +315,11 @@ public class AssignmentPlan implements Comparable<AssignmentPlan> {
             msg.append(" ->");
             for (Tuple<Deployment, Integer> modelAllocations : nodeToModel.get(n)
                 .stream()
-                .sorted(Comparator.comparing(x -> x.v1().id()))
+                .sorted(Comparator.comparing(x -> x.v1().deploymentId()))
                 .toList()) {
                 if (modelAllocations.v2() > 0) {
                     msg.append(" ");
-                    msg.append(modelAllocations.v1().id());
+                    msg.append(modelAllocations.v1().deploymentId());
                     msg.append(" (mem = ");
                     msg.append(ByteSizeValue.ofBytes(modelAllocations.v1().memoryBytes()));
                     msg.append(")");
@@ -304,19 +396,41 @@ public class AssignmentPlan implements Comparable<AssignmentPlan> {
         }
 
         boolean canAssign(Deployment deployment, Node node, int allocations) {
-            return (isAlreadyAssigned(deployment, node)
-                || (deployment.memoryBytes() <= remainingNodeMemory.get(node))
-                    && (deployment.priority == Priority.LOW
-                        || allocations * deployment.threadsPerAllocation() <= remainingNodeCores.get(node)));
+            long requiredMemory = getDeploymentMemoryRequirement(deployment, node, allocations);
+            return canAssign(deployment, node, allocations, requiredMemory);
+        }
+
+        boolean canAssign(Deployment deployment, Node node, int allocations, long requiredMemory) {
+            return (requiredMemory <= remainingNodeMemory.get(node))
+                && (deployment.priority == Priority.LOW || allocations * deployment.threadsPerAllocation() <= remainingNodeCores.get(node));
+        }
+
+        public long getDeploymentMemoryRequirement(Deployment deployment, Node node, int newAllocations) {
+            int assignedAllocations = getAssignedAllocations(deployment, node);
+
+            if (assignedAllocations > 0) {
+                return deployment.estimateAdditionalMemoryUsageBytes(assignedAllocations, assignedAllocations + newAllocations);
+            }
+            return deployment.estimateMemoryUsageBytes(newAllocations);
         }
 
         public Builder assignModelToNode(Deployment deployment, Node node, int allocations) {
+            return assignModelToNode(deployment, node, allocations, getDeploymentMemoryRequirement(deployment, node, allocations));
+        }
+
+        public Builder assignModelToNode(Deployment deployment, Node node, int allocations, long requiredMemory) {
             if (allocations <= 0) {
                 return this;
             }
-            if (isAlreadyAssigned(deployment, node) == false && deployment.memoryBytes() > remainingNodeMemory.get(node)) {
+            if (requiredMemory > remainingNodeMemory.get(node)) {
                 throw new IllegalArgumentException(
-                    "not enough memory on node [" + node.id() + "] to assign model [" + deployment.id() + "]"
+                    "not enough memory on node ["
+                        + node.id()
+                        + "] to assign ["
+                        + allocations
+                        + "] allocations to deployment ["
+                        + deployment.deploymentId()
+                        + "]"
                 );
             }
             if (deployment.priority == Priority.NORMAL && allocations * deployment.threadsPerAllocation() > remainingNodeCores.get(node)) {
@@ -326,16 +440,16 @@ public class AssignmentPlan implements Comparable<AssignmentPlan> {
                         + "] to assign ["
                         + allocations
                         + "] allocations to deployment ["
-                        + deployment.id()
+                        + deployment.deploymentId()
                         + "]; required threads per allocation ["
                         + deployment.threadsPerAllocation()
                         + "]"
                 );
             }
 
-            long additionalModelMemory = isAlreadyAssigned(deployment, node) ? 0 : deployment.memoryBytes;
             assignments.get(deployment).compute(node, (n, remAllocations) -> remAllocations + allocations);
-            remainingNodeMemory.compute(node, (n, remMemory) -> remMemory - additionalModelMemory);
+            accountMemory(deployment, node, requiredMemory);
+
             if (deployment.priority == Priority.NORMAL) {
                 remainingNodeCores.compute(node, (n, remCores) -> remCores - allocations * deployment.threadsPerAllocation());
             }
@@ -343,12 +457,29 @@ public class AssignmentPlan implements Comparable<AssignmentPlan> {
             return this;
         }
 
-        private boolean isAlreadyAssigned(Deployment deployment, Node node) {
-            return deployment.currentAllocationsByNodeId().containsKey(node.id()) || assignments.get(deployment).get(node) > 0;
+        private int getAssignedAllocations(Deployment deployment, Node node) {
+            int currentAllocations = getCurrentAllocations(deployment, node);
+            int assignmentAllocations = assignments.get(deployment).get(node);
+            return currentAllocations + assignmentAllocations;
+        }
+
+        private static int getCurrentAllocations(Deployment m, Node n) {
+            return m.currentAllocationsByNodeId.containsKey(n.id()) ? m.currentAllocationsByNodeId.get(n.id()) : 0;
         }
 
         public void accountMemory(Deployment m, Node n) {
-            remainingNodeMemory.computeIfPresent(n, (k, v) -> v - m.memoryBytes());
+            if (m.currentAllocationsByNodeId().containsKey(n.id())) {
+                int allocations = m.currentAllocationsByNodeId().get(n.id());
+                long requiredMemory = m.estimateMemoryUsageBytes(allocations);
+                accountMemory(m, n, requiredMemory);
+            }
+        }
+
+        private void accountMemory(Deployment m, Node n, long requiredMemory) {
+            remainingNodeMemory.computeIfPresent(n, (k, v) -> v - requiredMemory);
+            if (remainingNodeMemory.containsKey(n) && remainingNodeMemory.get(n) < 0) {
+                throw new IllegalArgumentException("not enough memory on node [" + n.id() + "] to assign model [" + m.deploymentId() + "]");
+            }
         }
 
         public AssignmentPlan build() {

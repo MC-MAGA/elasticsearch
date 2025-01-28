@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.admin.indices.shards;
@@ -29,7 +30,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Response for {@link IndicesShardStoresAction}
+ * Response for {@link TransportIndicesShardStoresAction}
  *
  * Consists of {@link StoreStatus}s for requested indices grouped by
  * indices and shard ids and a list of encountered node {@link Failure}s
@@ -245,8 +246,10 @@ public class IndicesShardStoresResponse extends ActionResponse implements Chunke
 
     public IndicesShardStoresResponse(StreamInput in) throws IOException {
         super(in);
-        storeStatuses = in.readImmutableMap(i -> i.readImmutableMap(StreamInput::readInt, j -> j.readImmutableList(StoreStatus::new)));
-        failures = in.readImmutableList(Failure::readFailure);
+        storeStatuses = in.readImmutableMap(
+            i -> i.readImmutableMap(StreamInput::readInt, j -> j.readCollectionAsImmutableList(StoreStatus::new))
+        );
+        failures = in.readCollectionAsImmutableList(Failure::readFailure);
     }
 
     /**
@@ -267,12 +270,8 @@ public class IndicesShardStoresResponse extends ActionResponse implements Chunke
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeMap(
-            storeStatuses,
-            StreamOutput::writeString,
-            (o, v) -> o.writeMap(v, StreamOutput::writeInt, StreamOutput::writeCollection)
-        );
-        out.writeList(failures);
+        out.writeMap(storeStatuses, (o, v) -> o.writeMap(v, StreamOutput::writeInt, StreamOutput::writeCollection));
+        out.writeCollection(failures);
     }
 
     @Override

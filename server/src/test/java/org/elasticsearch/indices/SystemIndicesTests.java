@@ -1,13 +1,15 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.indices;
 
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.test.ESTestCase;
 
 import java.util.Collections;
@@ -18,9 +20,11 @@ import java.util.Map;
 import static org.elasticsearch.tasks.TaskResultsService.TASKS_FEATURE_NAME;
 import static org.elasticsearch.tasks.TaskResultsService.TASK_INDEX;
 import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.notNullValue;
 
 public class SystemIndicesTests extends ESTestCase {
     private static final String OPTIONAL_UPGRADE_SUFFIX_REGEX = "(" + SystemIndices.UPGRADED_INDEX_SUFFIX + ")?";
@@ -252,5 +256,38 @@ public class SystemIndicesTests extends ESTestCase {
                 containsString(firstFeature)
             )
         );
+    }
+
+    public void testMappingsVersions() {
+        SystemIndexDescriptor unmanaged = SystemIndexDescriptorUtils.createUnmanaged(".unmanaged-*", "unmanaged");
+        SystemIndexDescriptor managed = SystemIndexDescriptor.builder()
+            .setIndexPattern(".managed-*")
+            .setPrimaryIndex(".managed-primary")
+            .setOrigin("system")
+            .setSettings(Settings.EMPTY)
+            .setMappings("""
+                  {
+                    "_meta": {
+                      "version": "8.0.0",
+                      "managed_index_mappings_version": 3
+                    },
+                    "properties": {
+                      "name": { "type": "text" }
+                    }
+                  }
+                """)
+            .build();
+
+        SystemIndices systemIndices = new SystemIndices(
+            List.of(
+                new SystemIndices.Feature("unmanaged", "unmanaged", List.of(unmanaged)),
+                new SystemIndices.Feature("managed", "managed", List.of(managed))
+            )
+        );
+
+        Map<String, SystemIndexDescriptor.MappingsVersion> mappingsVersions = systemIndices.getMappingsVersions();
+        assertThat(mappingsVersions.get(".managed-primary"), notNullValue());
+        assertThat(mappingsVersions.get(".managed-primary").version(), equalTo(3));
+        assertThat(mappingsVersions.keySet(), not(contains("unmanaged")));
     }
 }

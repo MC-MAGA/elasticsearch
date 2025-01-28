@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster.metadata;
@@ -367,7 +368,7 @@ public class MetadataIndexStateServiceTests extends ESTestCase {
             snapshot,
             randomBoolean(),
             false,
-            SnapshotsInProgress.State.INIT,
+            SnapshotsInProgress.State.STARTED,
             Collections.singletonMap(index, new IndexId(index, index)),
             Collections.emptyList(),
             Collections.emptyList(),
@@ -376,7 +377,7 @@ public class MetadataIndexStateServiceTests extends ESTestCase {
             shardsBuilder,
             null,
             SnapshotInfoTestUtils.randomUserMetadata(),
-            IndexVersionUtils.randomVersion(random())
+            IndexVersionUtils.randomVersion()
         );
         return ClusterState.builder(newState).putCustom(SnapshotsInProgress.TYPE, SnapshotsInProgress.EMPTY.withAddedEntry(entry)).build();
     }
@@ -457,7 +458,7 @@ public class MetadataIndexStateServiceTests extends ESTestCase {
             assertThat(
                 RoutingNodesHelper.asStream(shardRoutingTable)
                     .map(ShardRouting::unassignedInfo)
-                    .map(UnassignedInfo::getReason)
+                    .map(UnassignedInfo::reason)
                     .allMatch(info -> info == UnassignedInfo.Reason.INDEX_CLOSED),
                 is(true)
             );

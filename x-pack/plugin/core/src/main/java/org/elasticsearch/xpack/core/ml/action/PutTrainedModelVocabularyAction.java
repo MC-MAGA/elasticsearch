@@ -7,7 +7,7 @@
 
 package org.elasticsearch.xpack.core.ml.action;
 
-import org.elasticsearch.TransportVersion;
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.ActionType;
 import org.elasticsearch.action.support.master.AcknowledgedRequest;
@@ -34,7 +34,7 @@ public class PutTrainedModelVocabularyAction extends ActionType<AcknowledgedResp
     public static final String NAME = "cluster:admin/xpack/ml/trained_models/vocabulary/put";
 
     private PutTrainedModelVocabularyAction() {
-        super(NAME, AcknowledgedResponse::readFrom);
+        super(NAME);
     }
 
     public static class Request extends AcknowledgedRequest<Request> {
@@ -70,6 +70,7 @@ public class PutTrainedModelVocabularyAction extends ActionType<AcknowledgedResp
             @Nullable List<Double> scores,
             boolean allowOverwriting
         ) {
+            super(TRAPPY_IMPLICIT_DEFAULT_MASTER_NODE_TIMEOUT, DEFAULT_ACK_TIMEOUT);
             this.modelId = ExceptionsHelper.requireNonNull(modelId, TrainedModelConfig.MODEL_ID);
             this.vocabulary = ExceptionsHelper.requireNonNull(vocabulary, VOCABULARY);
             this.merges = Optional.ofNullable(merges).orElse(List.of());
@@ -80,18 +81,18 @@ public class PutTrainedModelVocabularyAction extends ActionType<AcknowledgedResp
         public Request(StreamInput in) throws IOException {
             super(in);
             this.modelId = in.readString();
-            this.vocabulary = in.readStringList();
-            if (in.getTransportVersion().onOrAfter(TransportVersion.V_8_2_0)) {
-                this.merges = in.readStringList();
+            this.vocabulary = in.readStringCollectionAsList();
+            if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_2_0)) {
+                this.merges = in.readStringCollectionAsList();
             } else {
                 this.merges = List.of();
             }
-            if (in.getTransportVersion().onOrAfter(TransportVersion.V_8_500_010)) {
-                this.scores = in.readList(StreamInput::readDouble);
+            if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_9_X)) {
+                this.scores = in.readCollectionAsList(StreamInput::readDouble);
             } else {
                 this.scores = List.of();
             }
-            if (in.getTransportVersion().onOrAfter(TransportVersion.V_8_500_043)) {
+            if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_10_X)) {
                 this.allowOverwriting = in.readBoolean();
             } else {
                 this.allowOverwriting = false;
@@ -133,13 +134,13 @@ public class PutTrainedModelVocabularyAction extends ActionType<AcknowledgedResp
             super.writeTo(out);
             out.writeString(modelId);
             out.writeStringCollection(vocabulary);
-            if (out.getTransportVersion().onOrAfter(TransportVersion.V_8_2_0)) {
+            if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_2_0)) {
                 out.writeStringCollection(merges);
             }
-            if (out.getTransportVersion().onOrAfter(TransportVersion.V_8_500_010)) {
+            if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_9_X)) {
                 out.writeCollection(scores, StreamOutput::writeDouble);
             }
-            if (out.getTransportVersion().onOrAfter(TransportVersion.V_8_500_043)) {
+            if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_10_X)) {
                 out.writeBoolean(allowOverwriting);
             }
         }

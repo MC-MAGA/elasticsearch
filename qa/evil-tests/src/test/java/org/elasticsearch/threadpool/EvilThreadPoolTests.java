@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.threadpool;
@@ -21,6 +22,7 @@ import org.junit.Before;
 
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -49,7 +51,7 @@ public class EvilThreadPoolTests extends ESTestCase {
         for (String executor : ThreadPool.THREAD_POOL_TYPES.keySet()) {
             checkExecutionError(getExecuteRunner(threadPool.executor(executor)));
             checkExecutionError(getSubmitRunner(threadPool.executor(executor)));
-            checkExecutionError(getScheduleRunner(executor));
+            checkExecutionError(getScheduleRunner(threadPool.executor(executor)));
         }
     }
 
@@ -158,7 +160,7 @@ public class EvilThreadPoolTests extends ESTestCase {
             // here, it's ok for the exception not to bubble up. Accessing the future will yield the exception
             checkExecutionException(getSubmitRunner(threadPool.executor(executor)), false);
 
-            checkExecutionException(getScheduleRunner(executor), true);
+            checkExecutionException(getScheduleRunner(threadPool.executor(executor)), true);
         }
     }
 
@@ -310,7 +312,7 @@ public class EvilThreadPoolTests extends ESTestCase {
         };
     }
 
-    Consumer<Runnable> getScheduleRunner(String executor) {
+    Consumer<Runnable> getScheduleRunner(Executor executor) {
         return new Consumer<Runnable>() {
             @Override
             public void accept(Runnable runnable) {

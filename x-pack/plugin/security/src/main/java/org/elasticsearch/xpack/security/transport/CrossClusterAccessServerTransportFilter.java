@@ -41,6 +41,7 @@ final class CrossClusterAccessServerTransportFilter extends ServerTransportFilte
             Set.of(CROSS_CLUSTER_ACCESS_CREDENTIALS_HEADER_KEY, CROSS_CLUSTER_ACCESS_SUBJECT_INFO_HEADER_KEY)
         );
         allowedHeaders.add(AuditUtil.AUDIT_REQUEST_ID);
+        allowedHeaders.add(Task.TRACE_STATE);
         allowedHeaders.addAll(Task.HEADERS_TO_COPY);
         ALLOWED_TRANSPORT_HEADERS = Set.copyOf(allowedHeaders);
     }
@@ -108,14 +109,9 @@ final class CrossClusterAccessServerTransportFilter extends ServerTransportFilte
         }
     }
 
-    private void ensureRequiredHeaderInContext(ThreadContext threadContext, String requiredHeader) {
+    private static void ensureRequiredHeaderInContext(ThreadContext threadContext, String requiredHeader) {
         if (threadContext.getHeader(requiredHeader) == null) {
-            throw new IllegalArgumentException(
-                "Cross cluster requests through the dedicated remote cluster server port require transport header ["
-                    + requiredHeader
-                    + "] but none found. "
-                    + "Please ensure you have configured remote cluster credentials on the cluster originating the request."
-            );
+            throw CrossClusterAccessAuthenticationService.requiredHeaderMissingException(requiredHeader);
         }
     }
 

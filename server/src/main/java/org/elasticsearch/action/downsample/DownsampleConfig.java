@@ -1,13 +1,15 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.downsample;
 
+import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.common.Rounding;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.NamedWriteable;
@@ -234,5 +236,32 @@ public class DownsampleConfig implements NamedWriteable, ToXContentObject {
         }
         rounding.timeZone(ZoneId.of(timeZone, ZoneId.SHORT_IDS));
         return rounding.build().prepareForUnknown();
+    }
+
+    /**
+     * Generates a downsample index name in the format
+     * prefix-fixedInterval-baseIndexName
+     *
+     * Note that this looks for the base index name of the provided index metadata via the
+     * {@link IndexMetadata#INDEX_DOWNSAMPLE_ORIGIN_NAME_KEY} setting. This means that in case
+     * the provided index was already downsampled, we'll use the original source index (of the
+     * current provided downsample index) as the base index name.
+     */
+    public static String generateDownsampleIndexName(
+        String prefix,
+        IndexMetadata sourceIndexMetadata,
+        DateHistogramInterval fixedInterval
+    ) {
+        String downsampleOriginName = IndexMetadata.INDEX_DOWNSAMPLE_ORIGIN_NAME.get(sourceIndexMetadata.getSettings());
+        String sourceIndexName;
+        if (Strings.hasText(downsampleOriginName)) {
+            sourceIndexName = downsampleOriginName;
+        } else if (Strings.hasText(IndexMetadata.INDEX_DOWNSAMPLE_SOURCE_NAME.get(sourceIndexMetadata.getSettings()))) {
+            // bwc for downsample indices created pre 8.10 which didn't configure the origin
+            sourceIndexName = IndexMetadata.INDEX_DOWNSAMPLE_SOURCE_NAME.get(sourceIndexMetadata.getSettings());
+        } else {
+            sourceIndexName = sourceIndexMetadata.getIndex().getName();
+        }
+        return prefix + fixedInterval + "-" + sourceIndexName;
     }
 }

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search.query;
@@ -22,7 +23,6 @@ import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.TopDocs;
-import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.search.Weight;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.lucene.search.TopDocsAndMaxScore;
@@ -36,23 +36,18 @@ import org.elasticsearch.search.aggregations.AggregationPhase;
 import org.elasticsearch.search.internal.ContextIndexSearcher;
 import org.elasticsearch.search.internal.ScrollContext;
 import org.elasticsearch.search.internal.SearchContext;
-import org.elasticsearch.search.profile.query.CollectorResult;
-import org.elasticsearch.search.profile.query.ProfileCollectorManager;
 import org.elasticsearch.search.rank.RankSearchContext;
-import org.elasticsearch.search.rank.RankShardContext;
+import org.elasticsearch.search.rank.context.QueryPhaseRankShardContext;
 import org.elasticsearch.search.rescore.RescorePhase;
 import org.elasticsearch.search.sort.SortAndFormats;
 import org.elasticsearch.search.suggest.SuggestPhase;
 import org.elasticsearch.threadpool.ThreadPool;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
 import static org.elasticsearch.search.internal.SearchContext.TRACK_TOTAL_HITS_DISABLED;
-import static org.elasticsearch.search.profile.query.CollectorResult.REASON_SEARCH_QUERY_PHASE;
-import static org.elasticsearch.search.query.TopDocsCollectorManagerFactory.createTopDocsCollectorFactory;
 
 /**
  * Query phase of a search request, used to run the query and get back from each shard information about the matching documents
@@ -64,7 +59,14 @@ public class QueryPhase {
     private QueryPhase() {}
 
     public static void execute(SearchContext searchContext) throws QueryPhaseExecutionException {
-        if (searchContext.rankShardContext() == null) {
+        if (searchContext.queryPhaseRankShardContext() == null) {
+            if (searchContext.request().source() != null && searchContext.request().source().rankBuilder() != null) {
+                // if we have a RankBuilder provided, we want to fetch all rankWindowSize results
+                // and rerank the documents as per the RankBuilder's instructions.
+                // Pagination will take place later once they're all (re)ranked.
+                searchContext.size(searchContext.request().source().rankBuilder().rankWindowSize());
+                searchContext.from(0);
+            }
             executeQuery(searchContext);
         } else {
             executeRank(searchContext);
@@ -72,7 +74,7 @@ public class QueryPhase {
     }
 
     static void executeRank(SearchContext searchContext) throws QueryPhaseExecutionException {
-        RankShardContext rankShardContext = searchContext.rankShardContext();
+        QueryPhaseRankShardContext queryPhaseRankShardContext = searchContext.queryPhaseRankShardContext();
         QuerySearchResult querySearchResult = searchContext.queryResult();
 
         // run the combined boolean query total hits or aggregations
@@ -81,49 +83,51 @@ public class QueryPhase {
             searchContext.size(0);
             QueryPhase.executeQuery(searchContext);
         } else {
-            searchContext.queryResult()
-                .topDocs(
-                    new TopDocsAndMaxScore(new TopDocs(new TotalHits(0, TotalHits.Relation.EQUAL_TO), Lucene.EMPTY_SCORE_DOCS), Float.NaN),
-                    new DocValueFormat[0]
-                );
+            searchContext.queryResult().topDocs(new TopDocsAndMaxScore(Lucene.EMPTY_TOP_DOCS, Float.NaN), new DocValueFormat[0]);
         }
 
         List<TopDocs> rrfRankResults = new ArrayList<>();
         boolean searchTimedOut = querySearchResult.searchTimedOut();
         long serviceTimeEWMA = querySearchResult.serviceTimeEWMA();
         int nodeQueueSize = querySearchResult.nodeQueueSize();
-
-        // run each of the rank queries
-        for (Query rankQuery : rankShardContext.queries()) {
-            // if a search timeout occurs, exit with partial results
-            if (searchTimedOut) {
-                break;
+        try {
+            // run each of the rank queries
+            for (Query rankQuery : queryPhaseRankShardContext.queries()) {
+                // if a search timeout occurs, exit with partial results
+                if (searchTimedOut) {
+                    break;
+                }
+                try (
+                    RankSearchContext rankSearchContext = new RankSearchContext(
+                        searchContext,
+                        rankQuery,
+                        queryPhaseRankShardContext.rankWindowSize()
+                    )
+                ) {
+                    QueryPhase.addCollectorsAndSearch(rankSearchContext);
+                    QuerySearchResult rrfQuerySearchResult = rankSearchContext.queryResult();
+                    rrfRankResults.add(rrfQuerySearchResult.topDocs().topDocs);
+                    serviceTimeEWMA += rrfQuerySearchResult.serviceTimeEWMA();
+                    nodeQueueSize = Math.max(nodeQueueSize, rrfQuerySearchResult.nodeQueueSize());
+                    searchTimedOut = rrfQuerySearchResult.searchTimedOut();
+                }
             }
-            RankSearchContext rankSearchContext = new RankSearchContext(searchContext, rankQuery, rankShardContext.windowSize());
-            QueryPhase.addCollectorsAndSearch(rankSearchContext);
-            QuerySearchResult rrfQuerySearchResult = rankSearchContext.queryResult();
-            rrfRankResults.add(rrfQuerySearchResult.topDocs().topDocs);
-            serviceTimeEWMA += rrfQuerySearchResult.serviceTimeEWMA();
-            nodeQueueSize = Math.max(nodeQueueSize, rrfQuerySearchResult.nodeQueueSize());
-            searchTimedOut = rrfQuerySearchResult.searchTimedOut();
+
+            querySearchResult.setRankShardResult(queryPhaseRankShardContext.combineQueryPhaseResults(rrfRankResults));
+
+            // record values relevant to all queries
+            querySearchResult.searchTimedOut(searchTimedOut);
+            querySearchResult.serviceTimeEWMA(serviceTimeEWMA);
+            querySearchResult.nodeQueueSize(nodeQueueSize);
+        } catch (Exception e) {
+            throw new QueryPhaseExecutionException(searchContext.shardTarget(), "Failed to execute rank query", e);
         }
-
-        querySearchResult.setRankShardResult(rankShardContext.combine(rrfRankResults));
-
-        // record values relevant to all queries
-        querySearchResult.searchTimedOut(searchTimedOut);
-        querySearchResult.serviceTimeEWMA(serviceTimeEWMA);
-        querySearchResult.nodeQueueSize(nodeQueueSize);
     }
 
     static void executeQuery(SearchContext searchContext) throws QueryPhaseExecutionException {
         if (searchContext.hasOnlySuggest()) {
             SuggestPhase.execute(searchContext);
-            searchContext.queryResult()
-                .topDocs(
-                    new TopDocsAndMaxScore(new TopDocs(new TotalHits(0, TotalHits.Relation.EQUAL_TO), Lucene.EMPTY_SCORE_DOCS), Float.NaN),
-                    new DocValueFormat[0]
-                );
+            searchContext.queryResult().topDocs(new TopDocsAndMaxScore(Lucene.EMPTY_TOP_DOCS, Float.NaN), new DocValueFormat[0]);
             return;
         }
 
@@ -140,7 +144,6 @@ public class QueryPhase {
 
         RescorePhase.execute(searchContext);
         SuggestPhase.execute(searchContext);
-        AggregationPhase.execute(searchContext);
 
         if (searchContext.getProfilers() != null) {
             searchContext.queryResult().profileResults(searchContext.getProfilers().buildQueryPhaseResults());
@@ -184,26 +187,7 @@ public class QueryPhase {
                 }
             }
 
-            final TopDocsCollectorManagerFactory topDocsFactory = createTopDocsCollectorFactory(
-                searchContext,
-                searchContext.parsedPostFilter() != null || searchContext.minimumScore() != null
-            );
-            CollectorManager<? extends Collector, Void> topDocsCollectorManager = topDocsFactory.collectorManager();
-            ProfileCollectorManager<Void> topDocsProfileCollectorManager = null;
-            if (searchContext.getProfilers() != null) {
-                topDocsProfileCollectorManager = new ProfileCollectorManager<>(topDocsCollectorManager, topDocsFactory.profilerName);
-                topDocsCollectorManager = topDocsProfileCollectorManager;
-            }
-
-            CollectorManager<? extends Collector, Void> aggsCollectorManager = null;
-            ProfileCollectorManager<Void> aggsProfileCollectorManager = null;
-            if (searchContext.aggregations() != null) {
-                aggsCollectorManager = searchContext.aggregations().getAggsCollectorManager();
-                if (searchContext.getProfilers() != null) {
-                    aggsProfileCollectorManager = new ProfileCollectorManager<>(aggsCollectorManager, CollectorResult.REASON_AGGREGATION);
-                    aggsCollectorManager = aggsProfileCollectorManager;
-                }
-            }
+            final boolean hasFilterCollector = searchContext.parsedPostFilter() != null || searchContext.minimumScore() != null;
 
             Weight postFilterWeight = null;
             if (searchContext.parsedPostFilter() != null) {
@@ -214,76 +198,44 @@ public class QueryPhase {
                 );
             }
 
-            QueryPhaseCollector.CollectorManager queryPhaseCollectorManager = QueryPhaseCollector.createManager(
-                topDocsCollectorManager,
+            CollectorManager<Collector, QueryPhaseResult> collectorManager = QueryPhaseCollectorManager.createQueryPhaseCollectorManager(
                 postFilterWeight,
-                searchContext.terminateAfter(),
-                aggsCollectorManager,
-                searchContext.minimumScore()
+                searchContext.aggregations() == null ? null : searchContext.aggregations().getAggsCollectorManager(),
+                searchContext,
+                hasFilterCollector
             );
-            final CollectorManager<? extends Collector, Void> collectorManager;
-            if (searchContext.getProfilers() == null) {
-                collectorManager = queryPhaseCollectorManager;
-            } else {
-                ProfileCollectorManager<Void> queryPhaseProfileManager = new ProfileCollectorManager<>(
-                    queryPhaseCollectorManager,
-                    REASON_SEARCH_QUERY_PHASE,
-                    topDocsProfileCollectorManager,
-                    aggsProfileCollectorManager
-                );
-                searchContext.getProfilers().getCurrentQueryProfiler().setCollectorManager(queryPhaseProfileManager::getCollectorTree);
-                collectorManager = queryPhaseProfileManager;
-            }
 
             final Runnable timeoutRunnable = getTimeoutCheck(searchContext);
             if (timeoutRunnable != null) {
                 searcher.addQueryCancellation(timeoutRunnable);
             }
 
-            try {
-                searchWithCollectorManager(searchContext, searcher, query, collectorManager, timeoutRunnable != null);
-                if (queryPhaseCollectorManager.isTerminatedAfter()) {
-                    queryResult.terminatedEarly(true);
-                }
-                queryResult.topDocs(topDocsFactory.topDocsAndMaxScore(), topDocsFactory.sortValueFormats);
-                ExecutorService executor = searchContext.indexShard().getThreadPool().executor(ThreadPool.Names.SEARCH);
-                assert executor instanceof TaskExecutionTimeTrackingEsThreadPoolExecutor
-                    || (executor instanceof EsThreadPoolExecutor == false /* in case thread pool is mocked out in tests */)
-                    : "SEARCH threadpool should have an executor that exposes EWMA metrics, but is of type " + executor.getClass();
-                if (executor instanceof TaskExecutionTimeTrackingEsThreadPoolExecutor rExecutor) {
-                    queryResult.nodeQueueSize(rExecutor.getCurrentQueueSize());
-                    queryResult.serviceTimeEWMA((long) rExecutor.getTaskExecutionEWMA());
-                }
-            } finally {
-                // Search phase has finished, no longer need to check for timeout
-                // otherwise aggregation phase might get cancelled.
-                if (timeoutRunnable != null) {
-                    searcher.removeQueryCancellation(timeoutRunnable);
-                }
+            QueryPhaseResult queryPhaseResult = searcher.search(query, collectorManager);
+            if (searchContext.getProfilers() != null) {
+                searchContext.getProfilers().getCurrentQueryProfiler().setCollectorResult(queryPhaseResult.collectorResult());
+            }
+            queryResult.topDocs(queryPhaseResult.topDocsAndMaxScore(), queryPhaseResult.sortValueFormats());
+            if (searcher.timeExceeded()) {
+                assert timeoutRunnable != null : "TimeExceededException thrown even though timeout wasn't set";
+                SearchTimeoutException.handleTimeout(
+                    searchContext.request().allowPartialSearchResults(),
+                    searchContext.shardTarget(),
+                    searchContext.queryResult()
+                );
+            }
+            if (searchContext.terminateAfter() != SearchContext.DEFAULT_TERMINATE_AFTER) {
+                queryResult.terminatedEarly(queryPhaseResult.terminatedAfter());
+            }
+            ExecutorService executor = searchContext.indexShard().getThreadPool().executor(ThreadPool.Names.SEARCH);
+            assert executor instanceof TaskExecutionTimeTrackingEsThreadPoolExecutor
+                || (executor instanceof EsThreadPoolExecutor == false /* in case thread pool is mocked out in tests */)
+                : "SEARCH threadpool should have an executor that exposes EWMA metrics, but is of type " + executor.getClass();
+            if (executor instanceof TaskExecutionTimeTrackingEsThreadPoolExecutor rExecutor) {
+                queryResult.nodeQueueSize(rExecutor.getCurrentQueueSize());
+                queryResult.serviceTimeEWMA((long) rExecutor.getTaskExecutionEWMA());
             }
         } catch (Exception e) {
             throw new QueryPhaseExecutionException(searchContext.shardTarget(), "Failed to execute main query", e);
-        }
-    }
-
-    private static void searchWithCollectorManager(
-        SearchContext searchContext,
-        ContextIndexSearcher searcher,
-        Query query,
-        CollectorManager<? extends Collector, Void> collectorManager,
-        boolean timeoutSet
-    ) throws IOException {
-        QuerySearchResult queryResult = searchContext.queryResult();
-        searcher.search(query, collectorManager);
-        if (searcher.timeExceeded()) {
-            assert timeoutSet : "TimeExceededException thrown even though timeout wasn't set";
-            if (searchContext.request().allowPartialSearchResults() == false) {
-                throw new QueryPhaseExecutionException(searchContext.shardTarget(), "Time exceeded");
-            }
-            queryResult.searchTimedOut(true);
-        }
-        if (searchContext.terminateAfter() != SearchContext.DEFAULT_TERMINATE_AFTER && queryResult.terminatedEarly() == null) {
-            queryResult.terminatedEarly(false);
         }
     }
 
@@ -297,7 +249,7 @@ public class QueryPhase {
         }
         final Sort sort = sortAndFormats.sort;
         for (LeafReaderContext ctx : reader.leaves()) {
-            Sort indexSort = ctx.reader().getMetaData().getSort();
+            Sort indexSort = ctx.reader().getMetaData().sort();
             if (indexSort == null || Lucene.canEarlyTerminate(sort, indexSort) == false) {
                 return false;
             }

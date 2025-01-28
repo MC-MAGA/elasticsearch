@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.mapper;
@@ -41,7 +42,7 @@ public class MultiFieldsSerializationTests extends ESTestCase {
         }
 
         Mapper.Builder root = new BooleanFieldMapper.Builder("root", ScriptCompiler.NONE, false, IndexVersion.current());
-        FieldMapper.MultiFields multiFields = builder.build(root, MapperBuilderContext.root(false));
+        FieldMapper.MultiFields multiFields = builder.build(root, MapperBuilderContext.root(false, false));
 
         String serialized = Strings.toString(multiFields);
         int lastStart = 0;

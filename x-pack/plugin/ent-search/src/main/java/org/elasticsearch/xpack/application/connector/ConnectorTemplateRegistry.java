@@ -7,9 +7,7 @@
 
 package org.elasticsearch.xpack.application.connector;
 
-import org.elasticsearch.Version;
 import org.elasticsearch.client.internal.Client;
-import org.elasticsearch.cluster.ClusterChangedEvent;
 import org.elasticsearch.cluster.metadata.ComponentTemplate;
 import org.elasticsearch.cluster.metadata.ComposableIndexTemplate;
 import org.elasticsearch.cluster.service.ClusterService;
@@ -21,6 +19,7 @@ import org.elasticsearch.xcontent.json.JsonXContent;
 import org.elasticsearch.xpack.core.template.IndexTemplateConfig;
 import org.elasticsearch.xpack.core.template.IndexTemplateRegistry;
 import org.elasticsearch.xpack.core.template.IngestPipelineConfig;
+import org.elasticsearch.xpack.core.template.JsonIngestPipelineConfig;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -31,26 +30,26 @@ import static org.elasticsearch.xpack.core.ClientHelper.ENT_SEARCH_ORIGIN;
 
 public class ConnectorTemplateRegistry extends IndexTemplateRegistry {
 
-    static final Version MIN_NODE_VERSION = Version.V_8_10_0;
-
     // This number must be incremented when we make changes to built-in templates.
-    static final int REGISTRY_VERSION = 1;
+    static final int REGISTRY_VERSION = 3;
 
     // Connector indices constants
 
-    public static final String CONNECTOR_INDEX_NAME_PATTERN = ".elastic-connectors-v" + REGISTRY_VERSION;
+    public static final String CONNECTOR_INDEX_NAME_PATTERN = ".elastic-connectors-v1";
     public static final String CONNECTOR_TEMPLATE_NAME = "elastic-connectors";
 
-    public static final String CONNECTOR_SYNC_JOBS_INDEX_NAME_PATTERN = ".elastic-connectors-sync-jobs-v" + REGISTRY_VERSION;
+    public static final String CONNECTOR_SYNC_JOBS_INDEX_NAME_PATTERN = ".elastic-connectors-sync-jobs-v1";
     public static final String CONNECTOR_SYNC_JOBS_TEMPLATE_NAME = "elastic-connectors-sync-jobs";
 
+    public static final String ACCESS_CONTROL_INDEX_PREFIX = ".search-acl-filter-";
     public static final String ACCESS_CONTROL_INDEX_NAME_PATTERN = ".search-acl-filter-*";
     public static final String ACCESS_CONTROL_TEMPLATE_NAME = "search-acl-filter";
 
-    // Pipeline constants
+    public static final String MANAGED_CONNECTOR_INDEX_PREFIX = "content-";
 
-    public static final String ENT_SEARCH_GENERIC_PIPELINE_NAME = "ent-search-generic-ingestion";
-    public static final String ENT_SEARCH_GENERIC_PIPELINE_FILE = "generic_ingestion_pipeline";
+    // Pipeline constants
+    public static final String SEARCH_DEFAULT_PIPELINE_NAME = "search-default-ingestion";
+    public static final String SEARCH_DEFAULT_PIPELINE_FILE = "search_default_pipeline";
 
     // Resource config
     public static final String ROOT_RESOURCE_PATH = "/entsearch/";
@@ -96,11 +95,8 @@ public class ConnectorTemplateRegistry extends IndexTemplateRegistry {
             )
         )) {
 
-            try {
-                componentTemplates.put(
-                    config.getTemplateName(),
-                    ComponentTemplate.parse(JsonXContent.jsonXContent.createParser(XContentParserConfiguration.EMPTY, config.loadBytes()))
-                );
+            try (var parser = JsonXContent.jsonXContent.createParser(XContentParserConfiguration.EMPTY, config.loadBytes())) {
+                componentTemplates.put(config.getTemplateName(), ComponentTemplate.parse(parser));
             } catch (IOException e) {
                 throw new AssertionError(e);
             }
@@ -111,9 +107,9 @@ public class ConnectorTemplateRegistry extends IndexTemplateRegistry {
     @Override
     protected List<IngestPipelineConfig> getIngestPipelines() {
         return List.of(
-            new IngestPipelineConfig(
-                ENT_SEARCH_GENERIC_PIPELINE_NAME,
-                ROOT_RESOURCE_PATH + ENT_SEARCH_GENERIC_PIPELINE_FILE + ".json",
+            new JsonIngestPipelineConfig(
+                SEARCH_DEFAULT_PIPELINE_NAME,
+                ROOT_RESOURCE_PATH + SEARCH_DEFAULT_PIPELINE_FILE + ".json",
                 REGISTRY_VERSION,
                 TEMPLATE_VERSION_VARIABLE
             )
@@ -172,12 +168,5 @@ public class ConnectorTemplateRegistry extends IndexTemplateRegistry {
     protected boolean requiresMasterNode() {
         // Necessary to prevent conflicts in some mixed-cluster environments with pre-7.7 nodes
         return true;
-    }
-
-    @Override
-    protected boolean isClusterReady(ClusterChangedEvent event) {
-        // Ensure templates are installed only once all nodes are updated to 8.10.0.
-        Version minNodeVersion = event.state().nodes().getMinNodeVersion();
-        return minNodeVersion.onOrAfter(MIN_NODE_VERSION);
     }
 }

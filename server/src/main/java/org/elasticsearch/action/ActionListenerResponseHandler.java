@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action;
@@ -11,7 +12,6 @@ package org.elasticsearch.action;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
-import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportException;
 import org.elasticsearch.transport.TransportResponse;
 import org.elasticsearch.transport.TransportResponseHandler;
@@ -35,8 +35,8 @@ public class ActionListenerResponseHandler<Response extends TransportResponse> i
      * @param executor The executor to use to deserialize the response and notify the listener. You must only use
      *                 {@link EsExecutors#DIRECT_EXECUTOR_SERVICE} (or equivalently {@link TransportResponseHandler#TRANSPORT_WORKER})
      *                 for very performance-critical actions, and even then only if the deserialization and handling work is very cheap,
-     *                 because this executor will perform because this executor will perform all the work for responses from remote nodes on
-     *                 the receiving transport worker itself.
+     *                 because this executor will perform all the work for responses from remote nodes on the receiving transport worker
+     *                 itself.
      */
     public ActionListenerResponseHandler(ActionListener<? super Response> listener, Writeable.Reader<Response> reader, Executor executor) {
         this.listener = Objects.requireNonNull(listener);
@@ -55,7 +55,7 @@ public class ActionListenerResponseHandler<Response extends TransportResponse> i
     }
 
     @Override
-    public Executor executor(ThreadPool threadPool) {
+    public Executor executor() {
         return executor;
     }
 
@@ -66,6 +66,6 @@ public class ActionListenerResponseHandler<Response extends TransportResponse> i
 
     @Override
     public String toString() {
-        return super.toString() + "/" + listener;
+        return getClass().getSimpleName() + '[' + listener + ']';
     }
 }

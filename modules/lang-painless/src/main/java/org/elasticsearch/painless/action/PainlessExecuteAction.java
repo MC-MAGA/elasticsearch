@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.painless.action;
 
@@ -24,11 +25,12 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.action.ActionType;
+import org.elasticsearch.action.IndicesRequest;
+import org.elasticsearch.action.RemoteClusterActionType;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.action.support.single.shard.SingleShardRequest;
 import org.elasticsearch.action.support.single.shard.TransportSingleShardAction;
-import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlockException;
@@ -39,7 +41,6 @@ import org.elasticsearch.common.CheckedBiFunction;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.geo.GeometryFormatterFactory;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
@@ -50,19 +51,24 @@ import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Strings;
 import org.elasticsearch.core.Tuple;
+import org.elasticsearch.geometry.Geometry;
 import org.elasticsearch.geometry.Point;
 import org.elasticsearch.index.Index;
+import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.index.IndexService;
+import org.elasticsearch.index.IndexVersions;
 import org.elasticsearch.index.mapper.DateFieldMapper;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.OnScriptError;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.index.mapper.SourceToParse;
+import org.elasticsearch.index.mapper.TimeSeriesRoutingHashFieldMapper;
 import org.elasticsearch.index.query.AbstractQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.SearchExecutionContext;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.indices.IndicesService;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.painless.spi.PainlessTestScript;
 import org.elasticsearch.rest.BaseRestHandler;
 import org.elasticsearch.rest.RestRequest;
@@ -76,6 +82,7 @@ import org.elasticsearch.script.DocValuesDocReader;
 import org.elasticsearch.script.DoubleFieldScript;
 import org.elasticsearch.script.FilterScript;
 import org.elasticsearch.script.GeoPointFieldScript;
+import org.elasticsearch.script.GeometryFieldScript;
 import org.elasticsearch.script.IpFieldScript;
 import org.elasticsearch.script.LongFieldScript;
 import org.elasticsearch.script.ScoreScript;
@@ -88,6 +95,8 @@ import org.elasticsearch.script.StringFieldScript;
 import org.elasticsearch.search.lookup.SearchLookup;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
+import org.elasticsearch.transport.RemoteClusterAware;
+import org.elasticsearch.transport.RemoteClusterService;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xcontent.ConstructingObjectParser;
 import org.elasticsearch.xcontent.NamedXContentRegistry;
@@ -111,16 +120,14 @@ import static org.elasticsearch.action.ValidateActions.addValidationError;
 import static org.elasticsearch.rest.RestRequest.Method.GET;
 import static org.elasticsearch.rest.RestRequest.Method.POST;
 
-public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Response> {
+public class PainlessExecuteAction {
 
-    public static final PainlessExecuteAction INSTANCE = new PainlessExecuteAction();
-    private static final String NAME = "cluster:admin/scripts/painless/execute";
+    public static final ActionType<Response> INSTANCE = new ActionType<>("cluster:admin/scripts/painless/execute");
+    public static final RemoteClusterActionType<Response> REMOTE_TYPE = new RemoteClusterActionType<>(INSTANCE.name(), Response::new);
 
-    private PainlessExecuteAction() {
-        super(NAME, Response::new);
-    }
+    private PainlessExecuteAction() {/* no instances */}
 
-    public static class Request extends SingleShardRequest<Request> implements ToXContentObject {
+    public static class Request extends SingleShardRequest<Request> implements ToXContentObject, IndicesRequest.SingleIndexNoWildcards {
 
         private static final ParseField SCRIPT_FIELD = new ParseField("script");
         private static final ParseField CONTEXT_FIELD = new ParseField("context");
@@ -216,7 +223,9 @@ public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Resp
             }
 
             /**
-             * @param indexExpression should be of the form "index" or "cluster:index". Wildcards are OK.
+             * @param indexExpression should be of the form "index" or "cluster:index". Wildcards are not allowed
+             *                        (if wildcards are present, an exception will be thrown in later processing, so
+             *                        we don't check it here).
              * @return Tuple where first entry is clusterAlias, which will be null if not in the indexExpression
              *         and second entry is the index name
              *         Tuple(null, null) will be returned if indexExpression is null
@@ -228,28 +237,21 @@ public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Resp
                     return new Tuple<>(null, null);
                 }
                 String trimmed = indexExpression.trim();
-                if (trimmed.startsWith(":") || trimmed.endsWith(":")) {
-                    throw new IllegalArgumentException(
-                        "Unable to parse one single valid index name from the provided index: [" + indexExpression + "]"
-                    );
-                }
-
+                String[] parts = RemoteClusterAware.splitIndexName(trimmed);
                 // The parser here needs to ensure that the indexExpression is not of the form "remote1:blogs,remote2:blogs"
                 // because (1) only a single index is allowed for Painless Execute and
                 // (2) if this method returns Tuple("remote1", "blogs,remote2:blogs") that will not fail with "index not found".
                 // Instead, it will fail with the inaccurate and confusing error message:
                 // "Cross-cluster calls are not supported in this context but remote indices were requested: [blogs,remote1:blogs]"
                 // which comes later out of the IndexNameExpressionResolver pathway this code uses.
-                String[] parts = indexExpression.split(":", 2);
-                if (parts.length == 1) {
-                    return new Tuple<>(null, parts[0]);
-                } else if (parts.length == 2 && parts[1].contains(":") == false) {
-                    return new Tuple<>(parts[0], parts[1]);
-                } else {
+                if ((parts[0] != null && parts[1].isEmpty())
+                    || parts[1].contains(String.valueOf(RemoteClusterAware.REMOTE_CLUSTER_INDEX_SEPARATOR))) {
                     throw new IllegalArgumentException(
                         "Unable to parse one single valid index name from the provided index: [" + indexExpression + "]"
                     );
                 }
+
+                return new Tuple<>(parts[0], parts[1]);
             }
 
             public String getClusterAlias() {
@@ -357,7 +359,11 @@ public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Resp
             this.context = scriptContextName != null ? fromScriptContextName(scriptContextName) : PainlessTestScript.CONTEXT;
             if (setup != null) {
                 this.contextSetup = setup;
-                index(contextSetup.index);
+                if (contextSetup.getClusterAlias() == null) {
+                    index(contextSetup.getIndex());
+                } else {
+                    index(contextSetup.getClusterAlias() + RemoteClusterAware.REMOTE_CLUSTER_INDEX_SEPARATOR + contextSetup.getIndex());
+                }
             } else {
                 contextSetup = null;
             }
@@ -448,7 +454,7 @@ public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Resp
 
     public static class Response extends ActionResponse implements ToXContentObject {
 
-        private Object result;
+        private final Object result;
 
         Response(Object result) {
             this.result = result;
@@ -505,7 +511,7 @@ public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Resp
             IndicesService indicesServices
         ) {
             super(
-                NAME,
+                INSTANCE.name(),
                 threadPool,
                 clusterService,
                 transportService,
@@ -515,7 +521,7 @@ public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Resp
                 // Creating a in-memory index is not light weight
                 // TODO: is MANAGEMENT TP the right TP? Right now this is an admin api (see action name).
                 Request::new,
-                ThreadPool.Names.MANAGEMENT
+                threadPool.executor(ThreadPool.Names.MANAGEMENT)
             );
             this.scriptService = scriptService;
             this.indicesServices = indicesServices;
@@ -526,11 +532,32 @@ public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Resp
             if (request.getContextSetup() == null || request.getContextSetup().getClusterAlias() == null) {
                 super.doExecute(task, request, listener);
             } else {
-                // forward to remote cluster
-                String clusterAlias = request.getContextSetup().getClusterAlias();
-                Client remoteClusterClient = transportService.getRemoteClusterService()
-                    .getRemoteClusterClient(threadPool, clusterAlias, EsExecutors.DIRECT_EXECUTOR_SERVICE);
-                remoteClusterClient.admin().cluster().execute(PainlessExecuteAction.INSTANCE, request, listener);
+                // forward to remote cluster after stripping off the clusterAlias from the index expression
+                removeClusterAliasFromIndexExpression(request);
+                transportService.getRemoteClusterService()
+                    .getRemoteClusterClient(
+                        request.getContextSetup().getClusterAlias(),
+                        EsExecutors.DIRECT_EXECUTOR_SERVICE,
+                        RemoteClusterService.DisconnectedStrategy.RECONNECT_UNLESS_SKIP_UNAVAILABLE
+                    )
+                    .execute(PainlessExecuteAction.REMOTE_TYPE, request, listener);
+            }
+        }
+
+        // Visible for testing
+        static void removeClusterAliasFromIndexExpression(Request request) {
+            if (request.index() != null) {
+                String[] split = RemoteClusterAware.splitIndexName(request.index());
+                if (split[0] != null) {
+                    /*
+                     * if the cluster alias is null and the index field has a clusterAlias (clusterAlias:index notation)
+                     * that means this is executing on a remote cluster (it was forwarded by the querying cluster).
+                     * The clusterAlias is not Writeable, so it will be null in the ContextSetup on the remote cluster.
+                     * We need to strip off the clusterAlias from the index before executing the script locally,
+                     * so it will resolve to a local index
+                     */
+                    request.index(split[1]);
+                }
             }
         }
 
@@ -610,6 +637,9 @@ public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Resp
                         luceneQuery = indexSearcher.rewrite(luceneQuery);
                         Weight weight = indexSearcher.createWeight(luceneQuery, ScoreMode.COMPLETE, 1f);
                         Scorer scorer = weight.scorer(indexSearcher.getIndexReader().leaves().get(0));
+                        if (scorer == null) {
+                            throw new IllegalArgumentException("The provided query did not match the sample document");
+                        }
                         // Consume the first (and only) match.
                         int docID = scorer.iterator().nextDoc();
                         assert docID == scorer.docID();
@@ -680,6 +710,25 @@ public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Resp
                         p -> new Point(p.lon(), p.lat())
                     );
                     return new Response(format.apply(points));
+                }, indexService);
+            } else if (scriptContext == GeometryFieldScript.CONTEXT) {
+                return prepareRamIndex(request, (context, leafReaderContext) -> {
+                    GeometryFieldScript.Factory factory = scriptService.compile(request.script, GeometryFieldScript.CONTEXT);
+                    GeometryFieldScript.LeafFactory leafFactory = factory.newFactory(
+                        GeometryFieldScript.CONTEXT.name,
+                        request.getScript().getParams(),
+                        context.lookup(),
+                        OnScriptError.FAIL
+                    );
+                    GeometryFieldScript geometryFieldScript = leafFactory.newInstance(leafReaderContext);
+                    List<Geometry> geometries = new ArrayList<>();
+                    geometryFieldScript.runForDoc(0, geometries::add);
+                    // convert geometries to the standard format of the fields api
+                    Function<List<Geometry>, List<Object>> format = GeometryFormatterFactory.getFormatter(
+                        GeometryFormatterFactory.GEOJSON,
+                        Function.identity()
+                    );
+                    return new Response(format.apply(geometries));
                 }, indexService);
             } else if (scriptContext == IpFieldScript.CONTEXT) {
                 return prepareRamIndex(request, (context, leafReaderContext) -> {
@@ -758,7 +807,18 @@ public class PainlessExecuteAction extends ActionType<PainlessExecuteAction.Resp
                 try (IndexWriter indexWriter = new IndexWriter(directory, new IndexWriterConfig(defaultAnalyzer))) {
                     BytesReference document = request.contextSetup.document;
                     XContentType xContentType = request.contextSetup.xContentType;
-                    SourceToParse sourceToParse = new SourceToParse("_id", document, xContentType);
+
+                    SourceToParse sourceToParse = (indexService.getIndexSettings().getMode() == IndexMode.TIME_SERIES)
+                        ? new SourceToParse(
+                            null,
+                            document,
+                            xContentType,
+                            indexService.getIndexSettings().getIndexVersionCreated().onOrAfter(IndexVersions.TIME_SERIES_ROUTING_HASH_IN_ID)
+                                ? TimeSeriesRoutingHashFieldMapper.DUMMY_ENCODED_VALUE
+                                : null
+                        )
+                        : new SourceToParse("_id", document, xContentType);
+
                     DocumentMapper documentMapper = indexService.mapperService().documentMapper();
                     if (documentMapper == null) {
                         documentMapper = DocumentMapper.createEmpty(indexService.mapperService());

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.synonyms;
@@ -21,6 +22,7 @@ import org.elasticsearch.synonyms.SynonymRule;
 import org.elasticsearch.synonyms.SynonymsManagementAPIService;
 import org.elasticsearch.xcontent.ConstructingObjectParser;
 import org.elasticsearch.xcontent.ParseField;
+import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xcontent.XContentParserConfiguration;
 import org.elasticsearch.xcontent.XContentType;
 
@@ -33,7 +35,7 @@ public class PutSynonymRuleAction extends ActionType<SynonymUpdateResponse> {
     public static final String NAME = "cluster:admin/synonym_rules/put";
 
     public PutSynonymRuleAction() {
-        super(NAME, SynonymUpdateResponse::new);
+        super(NAME);
     }
 
     public static class Request extends ActionRequest {
@@ -60,10 +62,11 @@ public class PutSynonymRuleAction extends ActionType<SynonymUpdateResponse> {
 
         public Request(String synonymsSetId, String synonymRuleId, BytesReference content, XContentType contentType) throws IOException {
             this.synonymsSetId = synonymsSetId;
-            this.synonymRule = PARSER.apply(
-                XContentHelper.createParser(XContentParserConfiguration.EMPTY, content, contentType),
-                synonymRuleId
-            );
+            try (XContentParser parser = XContentHelper.createParser(XContentParserConfiguration.EMPTY, content, contentType)) {
+                this.synonymRule = PARSER.apply(parser, synonymRuleId);
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Failed to parse: " + content.utf8ToString(), e);
+            }
         }
 
         Request(String synonymsSetId, SynonymRule synonymRule) {

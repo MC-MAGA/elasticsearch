@@ -1,14 +1,15 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.script;
 
-import org.elasticsearch.TransportVersion;
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
@@ -60,10 +61,10 @@ public record ScriptContextStats(
         var compilationLimitTriggered = in.readVLong();
         TimeSeries compilationsHistory;
         TimeSeries cacheEvictionsHistory;
-        if (in.getTransportVersion().onOrAfter(TransportVersion.V_8_1_0)) {
+        if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_1_0)) {
             compilationsHistory = new TimeSeries(in);
             cacheEvictionsHistory = new TimeSeries(in);
-        } else if (in.getTransportVersion().onOrAfter(TransportVersion.V_8_0_0)) {
+        } else if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_0_0)) {
             compilationsHistory = new TimeSeries(in).withTotal(compilations);
             cacheEvictionsHistory = new TimeSeries(in).withTotal(cacheEvictions);
         } else {
@@ -98,7 +99,7 @@ public record ScriptContextStats(
         out.writeVLong(compilations);
         out.writeVLong(cacheEvictions);
         out.writeVLong(compilationLimitTriggered);
-        if (out.getTransportVersion().onOrAfter(TransportVersion.V_8_0_0)) {
+        if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_0_0)) {
             compilationsHistory.writeTo(out);
             cacheEvictionsHistory.writeTo(out);
         }

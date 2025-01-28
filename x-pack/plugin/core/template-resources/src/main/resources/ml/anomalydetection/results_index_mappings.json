@@ -1,10 +1,19 @@
 {
   "_meta" : {
-    "version" : "${xpack.ml.version}"
+    "version" : "${xpack.ml.version}",
+    "managed_index_mappings_version": ${xpack.ml.managed.index.version}
   },
   "dynamic_templates" : [
     {
-      "strings_as_keywords" : {
+      "map_objects": {
+        "match_mapping_type": "object",
+        "mapping": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "non_objects_as_keywords" : {
         "match" : "*",
         "mapping" : {
           "type" : "keyword"

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.test.errorquery;
@@ -15,6 +16,7 @@ import org.apache.lucene.search.QueryVisitor;
 import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Weight;
 import org.elasticsearch.TransportVersion;
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.logging.HeaderWarning;
@@ -90,12 +92,12 @@ public class ErrorQueryBuilder extends AbstractQueryBuilder<ErrorQueryBuilder> {
 
     public ErrorQueryBuilder(StreamInput in) throws IOException {
         super(in);
-        this.indices = in.readList(IndexError::new);
+        this.indices = in.readCollectionAsList(IndexError::new);
     }
 
     @Override
     protected void doWriteTo(StreamOutput out) throws IOException {
-        out.writeList(indices);
+        out.writeCollection(indices);
     }
 
     @Override
@@ -133,7 +135,7 @@ public class ErrorQueryBuilder extends AbstractQueryBuilder<ErrorQueryBuilder> {
     });
 
     static {
-        PARSER.declareObjectArray(constructorArg(), (p, c) -> IndexError.PARSER.parse(p, c), new ParseField("indices"));
+        PARSER.declareObjectArray(constructorArg(), IndexError.PARSER, new ParseField("indices"));
         PARSER.declareFloat(ConstructingObjectParser.optionalConstructorArg(), BOOST_FIELD);
         PARSER.declareString(ConstructingObjectParser.optionalConstructorArg(), NAME_FIELD);
     }
@@ -164,7 +166,7 @@ public class ErrorQueryBuilder extends AbstractQueryBuilder<ErrorQueryBuilder> {
 
     @Override
     public TransportVersion getMinimalSupportedVersion() {
-        return TransportVersion.ZERO;
+        return TransportVersions.ZERO;
     }
 
     static void sleep(long millis) {

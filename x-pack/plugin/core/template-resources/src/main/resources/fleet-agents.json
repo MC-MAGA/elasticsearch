@@ -3,10 +3,11 @@
     "auto_expand_replicas": "0-1"
   },
   "mappings": {
-    "_doc" : {
+    "_doc": {
       "dynamic": false,
       "_meta": {
-        "version": "${fleet.version}"
+        "version": "${fleet.version}",
+        "managed_index_mappings_version": ${fleet.managed.index.version}
       },
       "properties": {
         "access_api_key_id": {
@@ -57,6 +58,9 @@
             }
           }
         },
+        "unhealthy_reason": {
+          "type": "keyword"
+        },
         "components": {
           "type": "object",
           "enabled": false
@@ -93,6 +97,9 @@
                       "type": "boolean"
                     },
                     "upgradeable": {
+                      "type": "boolean"
+                    },
+                    "unprivileged": {
                       "type": "boolean"
                     },
                     "version": {
@@ -244,6 +251,62 @@
         "upgraded_at": {
           "type": "date"
         },
+        "upgrade_details": {
+          "properties": {
+            "target_version": {
+              "type": "text",
+              "fields": {
+                "keyword": {
+                  "type": "keyword",
+                  "ignore_above": 16
+                }
+              }
+            },
+            "action_id": {
+              "type": "keyword"
+            },
+            "state": {
+              "type": "keyword"
+            },
+            "metadata": {
+              "properties": {
+                "scheduled_at": {
+                  "type": "date"
+                },
+                "download_percent": {
+                  "type": "double"
+                },
+                "download_rate": {
+                  "type": "double"
+                },
+                "failed_state": {
+                  "type": "keyword"
+                },
+                "error_msg": {
+                  "type": "text",
+                  "fields": {
+                    "keyword": {
+                      "type": "keyword",
+                      "ignore_above": 1024
+                    }
+                  }
+                },
+                "retry_error_msg": {
+                  "type": "text",
+                  "fields": {
+                    "keyword": {
+                      "type": "keyword",
+                      "ignore_above": 1024
+                    }
+                  }
+                },
+                "retry_until": {
+                  "type": "date"
+                }
+              }
+            }
+          }
+        },
         "upgrade_status": {
           "type": "keyword"
         },
@@ -252,6 +315,15 @@
           "enabled": false
         },
         "tags": {
+          "type": "keyword"
+        },
+        "namespaces": {
+          "type": "keyword"
+        },
+        "audit_unenrolled_time": {
+          "type": "date"
+        },
+        "audit_unenrolled_reason": {
           "type": "keyword"
         }
       }

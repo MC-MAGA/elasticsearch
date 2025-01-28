@@ -13,12 +13,11 @@ import org.elasticsearch.action.ActionType;
 import org.elasticsearch.action.support.master.MasterNodeReadRequest;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.xcontent.ConstructingObjectParser;
+import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.xcontent.ParseField;
 import org.elasticsearch.xcontent.ToXContent;
 import org.elasticsearch.xcontent.ToXContentObject;
 import org.elasticsearch.xcontent.XContentBuilder;
-import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xpack.application.analytics.AnalyticsCollection;
 
 import java.io.IOException;
@@ -26,23 +25,20 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
-import static org.elasticsearch.xcontent.ConstructingObjectParser.constructorArg;
+public class GetAnalyticsCollectionAction {
 
-public class GetAnalyticsCollectionAction extends ActionType<GetAnalyticsCollectionAction.Response> {
-
-    public static final GetAnalyticsCollectionAction INSTANCE = new GetAnalyticsCollectionAction();
     public static final String NAME = "cluster:admin/xpack/application/analytics/get";
+    public static final ActionType<GetAnalyticsCollectionAction.Response> INSTANCE = new ActionType<>(NAME);
 
-    private GetAnalyticsCollectionAction() {
-        super(NAME, GetAnalyticsCollectionAction.Response::new);
-    }
+    private GetAnalyticsCollectionAction() {/* no instances */}
 
     public static class Request extends MasterNodeReadRequest<Request> implements ToXContentObject {
         private final String[] names;
 
-        public static ParseField NAMES_FIELD = new ParseField("names");
+        public static final ParseField NAMES_FIELD = new ParseField("names");
 
-        public Request(String[] names) {
+        public Request(TimeValue masterNodeTimeout, String[] names) {
+            super(masterNodeTimeout);
             this.names = Objects.requireNonNull(names, "Collection names cannot be null");
         }
 
@@ -79,19 +75,6 @@ public class GetAnalyticsCollectionAction extends ActionType<GetAnalyticsCollect
             return Arrays.equals(this.names, request.names);
         }
 
-        @SuppressWarnings("unchecked")
-        private static final ConstructingObjectParser<Request, Void> PARSER = new ConstructingObjectParser<>(
-            "get_analytics_collection_request",
-            p -> new Request(((List<String>) p[0]).toArray(String[]::new))
-        );
-        static {
-            PARSER.declareStringArray(constructorArg(), NAMES_FIELD);
-        }
-
-        public static Request parse(XContentParser parser) {
-            return PARSER.apply(parser, null);
-        }
-
         @Override
         public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
             builder.startObject();
@@ -109,7 +92,7 @@ public class GetAnalyticsCollectionAction extends ActionType<GetAnalyticsCollect
 
         public Response(StreamInput in) throws IOException {
             super(in);
-            this.collections = in.readList(AnalyticsCollection::new);
+            this.collections = in.readCollectionAsList(AnalyticsCollection::new);
         }
 
         public Response(List<AnalyticsCollection> collections) {
@@ -134,7 +117,7 @@ public class GetAnalyticsCollectionAction extends ActionType<GetAnalyticsCollect
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
-            out.writeList(collections);
+            out.writeCollection(collections);
         }
 
         public List<AnalyticsCollection> getAnalyticsCollections() {

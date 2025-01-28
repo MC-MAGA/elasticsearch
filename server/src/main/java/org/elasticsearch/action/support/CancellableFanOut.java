@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.support;
@@ -80,14 +81,7 @@ public abstract class CancellableFanOut<Item, ItemResponse, FinalResponse> {
             });
         }
 
-        try (var refs = new RefCountingRunnable(() -> {
-            // When all sub-tasks are complete, pass the result from resultListener to the outer listener.
-            resultListenerCompleter.getAndSet(() -> {}).run();
-            // May block (very briefly) if there's a concurrent cancellation, so that we are sure the resultListener is now complete and
-            // therefore the outer listener is completed on this thread.
-            assert resultListener.isDone();
-            resultListener.addListener(listener);
-        })) {
+        try (var refs = new RefCountingRunnable(new SubtasksCompletionHandler<>(resultListenerCompleter, resultListener, listener))) {
             while (itemsIterator.hasNext()) {
                 final var item = itemsIterator.next();
 
@@ -122,7 +116,7 @@ public abstract class CancellableFanOut<Item, ItemResponse, FinalResponse> {
 
                     @Override
                     public String toString() {
-                        return "[" + CancellableFanOut.this + "][" + item + "]";
+                        return "[" + CancellableFanOut.this + "][" + listener + "][" + item + "]";
                     }
                 });
 
@@ -141,7 +135,7 @@ public abstract class CancellableFanOut<Item, ItemResponse, FinalResponse> {
         } catch (Exception e) {
             // NB the listener may have been completed already (by exiting this try block) so this exception may not be sent to the caller,
             // but we cannot do anything else with it; an exception here is a bug anyway.
-            logger.error("unexpected failure in [" + this + "]", e);
+            logger.error("unexpected failure in [" + this + "][" + listener + "]", e);
             assert false : e;
             throw e;
         }
@@ -182,4 +176,35 @@ public abstract class CancellableFanOut<Item, ItemResponse, FinalResponse> {
      * early release of any accumulated results. Beware of lambdas, and test carefully.
      */
     protected abstract FinalResponse onCompletion() throws Exception;
+
+    private static class SubtasksCompletionHandler<FinalResponse> implements Runnable {
+        private final AtomicReference<Runnable> resultListenerCompleter;
+        private final SubscribableListener<FinalResponse> resultListener;
+        private final ActionListener<FinalResponse> listener;
+
+        private SubtasksCompletionHandler(
+            AtomicReference<Runnable> resultListenerCompleter,
+            SubscribableListener<FinalResponse> resultListener,
+            ActionListener<FinalResponse> listener
+        ) {
+            this.resultListenerCompleter = resultListenerCompleter;
+            this.resultListener = resultListener;
+            this.listener = listener;
+        }
+
+        @Override
+        public void run() {
+            // When all sub-tasks are complete, pass the result from resultListener to the outer listener.
+            resultListenerCompleter.getAndSet(() -> {}).run();
+            // May block (very briefly) if there's a concurrent cancellation, so that we are sure the resultListener is now complete and
+            // therefore the outer listener is completed on this thread.
+            assert resultListener.isDone();
+            resultListener.addListener(listener);
+        }
+
+        @Override
+        public String toString() {
+            return getClass().getSimpleName() + "[" + listener.toString() + "]";
+        }
+    }
 }

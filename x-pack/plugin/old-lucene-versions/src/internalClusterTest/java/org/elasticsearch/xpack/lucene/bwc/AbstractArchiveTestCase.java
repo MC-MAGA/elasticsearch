@@ -21,6 +21,7 @@ import org.elasticsearch.license.PostStartTrialRequest;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.plugins.RepositoryPlugin;
 import org.elasticsearch.repositories.IndexId;
+import org.elasticsearch.repositories.RepositoriesMetrics;
 import org.elasticsearch.repositories.Repository;
 import org.elasticsearch.repositories.RepositoryData;
 import org.elasticsearch.repositories.fs.FsRepository;
@@ -60,7 +61,8 @@ public abstract class AbstractArchiveTestCase extends AbstractSnapshotIntegTestC
             NamedXContentRegistry namedXContentRegistry,
             ClusterService clusterService,
             BigArrays bigArrays,
-            RecoverySettings recoverySettings
+            RecoverySettings recoverySettings,
+            RepositoriesMetrics repositoriesMetrics
         ) {
             return Map.of(
                 FAKE_VERSIONS_TYPE,
@@ -92,11 +94,7 @@ public abstract class AbstractArchiveTestCase extends AbstractSnapshotIntegTestC
                             .put(
                                 IndexMetadata.SETTING_INDEX_VERSION_CREATED.getKey(),
                                 metadata.settings()
-                                    .getAsVersionId(
-                                        "version",
-                                        IndexVersion::fromId,
-                                        IndexVersion.fromId(randomBoolean() ? 5000099 : 6000099)
-                                    )
+                                    .getAsVersionId("version", IndexVersion::fromId, IndexVersion.fromId(randomFrom(5000099, 6000099)))
                             )
                     )
                     .build();
@@ -116,7 +114,8 @@ public abstract class AbstractArchiveTestCase extends AbstractSnapshotIntegTestC
 
         assertAcked(client().admin().indices().prepareDelete(indexName));
 
-        PostStartTrialRequest request = new PostStartTrialRequest().setType(License.LicenseType.TRIAL.getTypeName()).acknowledge(true);
+        PostStartTrialRequest request = new PostStartTrialRequest(TEST_REQUEST_TIMEOUT).setType(License.LicenseType.TRIAL.getTypeName())
+            .acknowledge(true);
         client().execute(PostStartTrialAction.INSTANCE, request).get();
     }
 }

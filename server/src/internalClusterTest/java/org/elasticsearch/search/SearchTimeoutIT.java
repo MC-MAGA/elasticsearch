@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search;
@@ -47,15 +48,15 @@ public class SearchTimeoutIT extends ESIntegTestCase {
 
     private void indexDocs() {
         for (int i = 0; i < 32; i++) {
-            client().prepareIndex("test").setId(Integer.toString(i)).setSource("field", "value").get();
+            prepareIndex("test").setId(Integer.toString(i)).setSource("field", "value").get();
         }
         refresh("test");
     }
 
+    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/98369")
     public void testTopHitsTimeout() {
         indexDocs();
-        SearchResponse searchResponse = client().prepareSearch("test")
-            .setTimeout(new TimeValue(10, TimeUnit.MILLISECONDS))
+        SearchResponse searchResponse = prepareSearch("test").setTimeout(new TimeValue(10, TimeUnit.MILLISECONDS))
             .setQuery(scriptQuery(new Script(ScriptType.INLINE, "mockscript", SCRIPT_NAME, Collections.emptyMap())))
             .get();
         assertThat(searchResponse.isTimedOut(), equalTo(true));
@@ -63,15 +64,14 @@ public class SearchTimeoutIT extends ESIntegTestCase {
         assertEquals(0, searchResponse.getFailedShards());
         assertThat(searchResponse.getSuccessfulShards(), greaterThan(0));
         assertEquals(searchResponse.getSuccessfulShards(), searchResponse.getTotalShards());
-        assertThat(searchResponse.getHits().getTotalHits().value, greaterThan(0L));
+        assertThat(searchResponse.getHits().getTotalHits().value(), greaterThan(0L));
         assertThat(searchResponse.getHits().getHits().length, greaterThan(0));
     }
 
     @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/98053")
     public void testAggsTimeout() {
         indexDocs();
-        SearchResponse searchResponse = client().prepareSearch("test")
-            .setTimeout(new TimeValue(10, TimeUnit.MILLISECONDS))
+        SearchResponse searchResponse = prepareSearch("test").setTimeout(new TimeValue(10, TimeUnit.MILLISECONDS))
             .setSize(0)
             .setQuery(scriptQuery(new Script(ScriptType.INLINE, "mockscript", SCRIPT_NAME, Collections.emptyMap())))
             .addAggregation(new TermsAggregationBuilder("terms").field("field.keyword"))
@@ -81,7 +81,7 @@ public class SearchTimeoutIT extends ESIntegTestCase {
         assertEquals(0, searchResponse.getFailedShards());
         assertThat(searchResponse.getSuccessfulShards(), greaterThan(0));
         assertEquals(searchResponse.getSuccessfulShards(), searchResponse.getTotalShards());
-        assertThat(searchResponse.getHits().getTotalHits().value, greaterThan(0L));
+        assertThat(searchResponse.getHits().getTotalHits().value(), greaterThan(0L));
         assertEquals(searchResponse.getHits().getHits().length, 0);
         StringTerms terms = searchResponse.getAggregations().get("terms");
         assertEquals(1, terms.getBuckets().size());
@@ -91,15 +91,13 @@ public class SearchTimeoutIT extends ESIntegTestCase {
     }
 
     public void testPartialResultsIntolerantTimeout() throws Exception {
-        client().prepareIndex("test").setId("1").setSource("field", "value").setRefreshPolicy(IMMEDIATE).get();
+        prepareIndex("test").setId("1").setSource("field", "value").setRefreshPolicy(IMMEDIATE).get();
 
         ElasticsearchException ex = expectThrows(
             ElasticsearchException.class,
-            () -> client().prepareSearch("test")
-                .setTimeout(new TimeValue(10, TimeUnit.MILLISECONDS))
+            prepareSearch("test").setTimeout(new TimeValue(10, TimeUnit.MILLISECONDS))
                 .setQuery(scriptQuery(new Script(ScriptType.INLINE, "mockscript", SCRIPT_NAME, Collections.emptyMap())))
                 .setAllowPartialSearchResults(false) // this line causes timeouts to report failures
-                .get()
         );
         assertTrue(ex.toString().contains("Time exceeded"));
     }

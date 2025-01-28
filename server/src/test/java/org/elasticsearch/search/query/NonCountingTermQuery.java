@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search.query;
@@ -23,9 +24,9 @@ import java.io.IOException;
  * Using this query we will never early-terminate the collection phase because we can already
  * get the document count from the term statistics of each segment.
  */
-class NonCountingTermQuery extends TermQuery {
+public final class NonCountingTermQuery extends TermQuery {
 
-    NonCountingTermQuery(Term term) {
+    public NonCountingTermQuery(Term term) {
         super(term);
     }
 

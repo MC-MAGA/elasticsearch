@@ -1,13 +1,20 @@
 [[put-synonyms-set]]
 === Create or update synonyms set
 
-beta::[]
-
 ++++
 <titleabbrev>Create or update synonyms set</titleabbrev>
 ++++
 
+.New API reference
+[sidebar]
+--
+For the most up-to-date API details, refer to {api-es}/group/endpoint-synonyms[Synonyms APIs].
+--
+
 Creates or updates a synonyms set.
+
+NOTE: Synonyms sets are limited to a maximum of 10,000 synonym rules per set.
+If you need to manage more synonym rules, you can create multiple synonyms sets.
 
 [[put-synonyms-set-request]]
 ==== {api-request-title}
@@ -45,8 +52,7 @@ In case a synonym rule id is not specified, an identifier will be created automa
 
 `synonyms`::
 (Required, string)
-The synonym rule. This needs to be in <<_solr_synonyms>> format.
-Some examples are:
+The synonym rule. This needs to be in <<analysis-synonym-graph-define-synonyms,Solr format>>. Some examples are:
 * "i-pod, i pod => ipod",
 * "universe, cosmos"
 

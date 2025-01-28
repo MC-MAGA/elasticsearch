@@ -1,11 +1,15 @@
 [[list-synonyms-sets]]
 === List synonyms sets
 
-beta::[]
-
 ++++
 <titleabbrev>List synonyms sets</titleabbrev>
 ++++
+
+.New API reference
+[sidebar]
+--
+For the most up-to-date API details, refer to {api-es}/group/endpoint-synonyms[Synonyms APIs].
+--
 
 Retrieves a summary of all defined synonyms sets.
 

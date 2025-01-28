@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.indices.state;
@@ -127,10 +128,7 @@ public class ReopenWhileClosingIT extends ESIntegTestCase {
      * Intercepts and blocks the {@link TransportVerifyShardBeforeCloseAction} executed for the given index pattern.
      */
     private Releasable interceptVerifyShardBeforeCloseActions(final String indexPattern, final Runnable onIntercept) {
-        final MockTransportService mockTransportService = (MockTransportService) internalCluster().getInstance(
-            TransportService.class,
-            internalCluster().getMasterName()
-        );
+        final var mockTransportService = MockTransportService.getInstance(internalCluster().getMasterName());
         final ListenableFuture<Void> release = new ListenableFuture<>();
         for (DiscoveryNode node : internalCluster().clusterService().state().getNodes()) {
             mockTransportService.addSendBehavior(
@@ -162,7 +160,7 @@ public class ReopenWhileClosingIT extends ESIntegTestCase {
     }
 
     private static void assertIndexIsBlocked(final String... indices) {
-        final ClusterState clusterState = clusterAdmin().prepareState().get().getState();
+        final ClusterState clusterState = clusterAdmin().prepareState(TEST_REQUEST_TIMEOUT).get().getState();
         for (String index : indices) {
             assertThat(clusterState.metadata().indices().get(index).getState(), is(IndexMetadata.State.OPEN));
             assertThat(clusterState.routingTable().index(index), notNullValue());

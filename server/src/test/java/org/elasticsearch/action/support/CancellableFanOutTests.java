@@ -1,15 +1,17 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.support;
 
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.action.DelegatingActionListener;
 import org.elasticsearch.tasks.CancellableTask;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.tasks.TaskCancelHelper;
@@ -30,7 +32,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.anyOf;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
@@ -80,9 +84,32 @@ public class CancellableFanOutTests extends ESTestCase {
                     return "completed";
                 }
             }
-        }.run(task, List.of("a", "b", "c").iterator(), future);
 
-        itemListeners.remove("a").onResponse("a-response");
+            @Override
+            public String toString() {
+                return "testFanOutWithoutCancellation$CancellableFanOut";
+            }
+        }.run(task, List.of("a", "b", "c").iterator(), new DelegatingActionListener<>(future) {
+            @Override
+            public void onResponse(String s) {
+                future.onResponse(s);
+            }
+
+            @Override
+            public String toString() {
+                return "testFanOutWithoutCancellation$listener";
+            }
+        });
+
+        final var itemListenerA = itemListeners.remove("a");
+        assertThat(
+            itemListenerA.toString(),
+            allOf(
+                containsString("[testFanOutWithoutCancellation$CancellableFanOut][testFanOutWithoutCancellation$listener][a]"),
+                containsString("SubtasksCompletionHandler[testFanOutWithoutCancellation$listener]")
+            )
+        );
+        itemListenerA.onResponse("a-response");
         assertFalse(future.isDone());
         itemListeners.remove("b").onFailure(new ElasticsearchException("b-response"));
         assertFalse(future.isDone());
@@ -221,6 +248,7 @@ public class CancellableFanOutTests extends ESTestCase {
 
         final var itemsProcessed = new AtomicInteger();
         final var completionLatch = new CountDownLatch(1);
+        final var onCompletionCalled = new AtomicBoolean();
         new CancellableFanOut<String, String, String>() {
             @Override
             protected void sendItemRequest(String s, ActionListener<String> listener) {
@@ -234,6 +262,7 @@ public class CancellableFanOutTests extends ESTestCase {
                 assertCurrentThread(isProcessorThread);
                 assertEquals(s, response);
                 assertThat(itemsProcessed.incrementAndGet(), lessThanOrEqualTo(items.size()));
+                assertFalse(onCompletionCalled.get());
             }
 
             @Override
@@ -242,10 +271,12 @@ public class CancellableFanOutTests extends ESTestCase {
                 assertThat(e, instanceOf(ElasticsearchException.class));
                 assertEquals("sendItemRequest", e.getMessage());
                 assertThat(itemsProcessed.incrementAndGet(), lessThanOrEqualTo(items.size()));
+                assertFalse(onCompletionCalled.get());
             }
 
             @Override
             protected String onCompletion() {
+                assertTrue(onCompletionCalled.compareAndSet(false, true));
                 assertEquals(items.size(), itemsProcessed.get());
                 assertCurrentThread(anyOf(isTestThread, isProcessorThread));
                 if (randomBoolean()) {

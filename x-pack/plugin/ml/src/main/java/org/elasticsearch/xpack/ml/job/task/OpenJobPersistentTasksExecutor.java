@@ -13,6 +13,7 @@ import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchStatusException;
 import org.elasticsearch.ResourceNotFoundException;
 import org.elasticsearch.TransportVersion;
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.RetryableAction;
 import org.elasticsearch.client.internal.Client;
@@ -60,6 +61,7 @@ import org.elasticsearch.xpack.ml.notifications.AnomalyDetectionAuditor;
 import org.elasticsearch.xpack.ml.process.MlMemoryTracker;
 import org.elasticsearch.xpack.ml.task.AbstractJobPersistentTasksExecutor;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -71,8 +73,7 @@ import java.util.Set;
 import static org.elasticsearch.core.Strings.format;
 import static org.elasticsearch.xpack.core.ClientHelper.ML_ORIGIN;
 import static org.elasticsearch.xpack.core.ClientHelper.executeAsyncWithOrigin;
-import static org.elasticsearch.xpack.core.ml.MachineLearningField.MIN_CHECKED_SUPPORTED_SNAPSHOT_VERSION;
-import static org.elasticsearch.xpack.core.ml.MachineLearningField.MIN_REPORTED_SUPPORTED_SNAPSHOT_VERSION;
+import static org.elasticsearch.xpack.core.ml.MachineLearningField.MIN_SUPPORTED_SNAPSHOT_VERSION;
 import static org.elasticsearch.xpack.core.ml.MlTasks.AWAITING_UPGRADE;
 import static org.elasticsearch.xpack.core.ml.MlTasks.PERSISTENT_TASK_MASTER_NODE_TIMEOUT;
 import static org.elasticsearch.xpack.ml.job.JobNodeSelector.AWAITING_LAZY_ASSIGNMENT;
@@ -83,7 +84,7 @@ public class OpenJobPersistentTasksExecutor extends AbstractJobPersistentTasksEx
 
     // Resuming a job with a running datafeed from its current snapshot was added in 7.11 and
     // can only be done if the master node is on or after that version.
-    private static final TransportVersion MIN_TRANSPORT_VERSION_FOR_REVERTING_TO_CURRENT_SNAPSHOT = TransportVersion.V_7_11_0;
+    private static final TransportVersion MIN_TRANSPORT_VERSION_FOR_REVERTING_TO_CURRENT_SNAPSHOT = TransportVersions.V_7_11_0;
 
     public static String[] indicesOfInterest(String resultsIndex) {
         if (resultsIndex == null) {
@@ -178,7 +179,7 @@ public class OpenJobPersistentTasksExecutor extends AbstractJobPersistentTasksEx
                 + jobId
                 + "] on node ["
                 + JobNodeSelector.nodeNameAndVersion(node)
-                + "], because the job's model snapshot requires a node of version ["
+                + "], because the job's model snapshot requires a node with ML config version ["
                 + job.getModelSnapshotMinVersion()
                 + "] or higher";
         }
@@ -277,7 +278,8 @@ public class OpenJobPersistentTasksExecutor extends AbstractJobPersistentTasksEx
             client,
             clusterState,
             PERSISTENT_TASK_MASTER_NODE_TIMEOUT,
-            resultsMappingUpdateHandler
+            resultsMappingUpdateHandler,
+            AnomalyDetectorsIndex.RESULTS_INDEX_MAPPINGS_VERSION
         );
     }
 
@@ -342,7 +344,7 @@ public class OpenJobPersistentTasksExecutor extends AbstractJobPersistentTasksEx
     private void failTask(JobTask jobTask, String reason) {
         String jobId = jobTask.getJobId();
         auditor.error(jobId, reason);
-        JobTaskState failedState = new JobTaskState(JobState.FAILED, jobTask.getAllocationId(), reason);
+        JobTaskState failedState = new JobTaskState(JobState.FAILED, jobTask.getAllocationId(), reason, Instant.now());
         jobTask.updatePersistentTaskState(failedState, ActionListener.wrap(r -> {
             logger.debug("[{}] updated task state to failed", jobId);
             stopAssociatedDatafeedForFailedJob(jobId);
@@ -395,18 +397,18 @@ public class OpenJobPersistentTasksExecutor extends AbstractJobPersistentTasksEx
     }
 
     private void getRunningDatafeed(String jobId, ActionListener<String> listener) {
-        ActionListener<Set<String>> datafeedListener = ActionListener.wrap(datafeeds -> {
+        ActionListener<Set<String>> datafeedListener = listener.delegateFailureAndWrap((delegate, datafeeds) -> {
             assert datafeeds.size() <= 1;
             if (datafeeds.isEmpty()) {
-                listener.onResponse(null);
+                delegate.onResponse(null);
                 return;
             }
 
             String datafeedId = datafeeds.iterator().next();
             PersistentTasksCustomMetadata tasks = clusterState.getMetadata().custom(PersistentTasksCustomMetadata.TYPE);
             PersistentTasksCustomMetadata.PersistentTask<?> datafeedTask = MlTasks.getDatafeedTask(datafeedId, tasks);
-            listener.onResponse(datafeedTask != null ? datafeedId : null);
-        }, listener::onFailure);
+            delegate.onResponse(datafeedTask != null ? datafeedId : null);
+        });
 
         datafeedConfigProvider.findDatafeedIdsForJobIds(Collections.singleton(jobId), datafeedListener);
     }
@@ -433,7 +435,7 @@ public class OpenJobPersistentTasksExecutor extends AbstractJobPersistentTasksEx
                     }
                     assert snapshot.getPage().results().size() == 1;
                     ModelSnapshot snapshotObj = snapshot.getPage().results().get(0);
-                    if (snapshotObj.getMinVersion().onOrAfter(MIN_CHECKED_SUPPORTED_SNAPSHOT_VERSION)) {
+                    if (snapshotObj.getMinVersion().onOrAfter(MIN_SUPPORTED_SNAPSHOT_VERSION)) {
                         listener.onResponse(true);
                         return;
                     }
@@ -443,7 +445,7 @@ public class OpenJobPersistentTasksExecutor extends AbstractJobPersistentTasksEx
                                 + "please revert to a newer model snapshot or reset the job",
                             jobId,
                             jobSnapshotId,
-                            MIN_REPORTED_SUPPORTED_SNAPSHOT_VERSION.toString()
+                            MIN_SUPPORTED_SNAPSHOT_VERSION.toString()
                         )
                     );
                 }, snapshotFailure -> {
@@ -484,7 +486,7 @@ public class OpenJobPersistentTasksExecutor extends AbstractJobPersistentTasksEx
                 // to be available so that and data deletion can succeed.
                 TimeValue.timeValueMinutes(15),
                 listener,
-                MachineLearning.UTILITY_THREAD_POOL_NAME
+                client.threadPool().executor(MachineLearning.UTILITY_THREAD_POOL_NAME)
             );
             this.jobTask = Objects.requireNonNull(jobTask);
         }
@@ -505,7 +507,7 @@ public class OpenJobPersistentTasksExecutor extends AbstractJobPersistentTasksEx
                     ResetJobAction.Request request = new ResetJobAction.Request(jobTask.getJobId());
                     request.setSkipJobStateValidation(true);
                     request.masterNodeTimeout(PERSISTENT_TASK_MASTER_NODE_TIMEOUT);
-                    request.timeout(PERSISTENT_TASK_MASTER_NODE_TIMEOUT);
+                    request.ackTimeout(PERSISTENT_TASK_MASTER_NODE_TIMEOUT);
                     executeAsyncWithOrigin(
                         client,
                         ML_ORIGIN,
@@ -522,7 +524,7 @@ public class OpenJobPersistentTasksExecutor extends AbstractJobPersistentTasksEx
                     request.setForce(true);
                     request.setDeleteInterveningResults(true);
                     request.masterNodeTimeout(PERSISTENT_TASK_MASTER_NODE_TIMEOUT);
-                    request.timeout(PERSISTENT_TASK_MASTER_NODE_TIMEOUT);
+                    request.ackTimeout(PERSISTENT_TASK_MASTER_NODE_TIMEOUT);
                     executeAsyncWithOrigin(
                         client,
                         ML_ORIGIN,

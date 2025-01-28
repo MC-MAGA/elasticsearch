@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.datastreams;
@@ -25,8 +26,8 @@ public abstract class DisabledSecurityDataStreamTestCase extends ESRestTestCase 
 
     @ClassRule
     public static ElasticsearchCluster cluster = ElasticsearchCluster.local()
-        .feature(FeatureFlag.DATA_STREAM_LIFECYCLE_ENABLED)
         .distribution(DistributionType.DEFAULT)
+        .feature(FeatureFlag.FAILURE_STORE_ENABLED)
         .setting("xpack.security.enabled", "false")
         .setting("xpack.watcher.enabled", "false")
         .build();
@@ -38,7 +39,11 @@ public abstract class DisabledSecurityDataStreamTestCase extends ESRestTestCase 
 
     @Override
     protected Settings restAdminSettings() {
-        String token = basicAuthHeaderValue("admin", new SecureString("admin-password".toCharArray()));
-        return Settings.builder().put(ThreadContext.PREFIX + ".Authorization", token).build();
+        if (super.restAdminSettings().keySet().contains(ThreadContext.PREFIX + ".Authorization")) {
+            return super.restAdminSettings();
+        } else {
+            String token = basicAuthHeaderValue("admin", new SecureString("admin-password".toCharArray()));
+            return Settings.builder().put(super.restAdminSettings()).put(ThreadContext.PREFIX + ".Authorization", token).build();
+        }
     }
 }

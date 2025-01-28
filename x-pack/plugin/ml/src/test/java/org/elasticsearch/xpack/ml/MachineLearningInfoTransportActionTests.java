@@ -10,9 +10,11 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.client.internal.Client;
+import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.Metadata;
+import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodeRole;
 import org.elasticsearch.cluster.node.DiscoveryNodeUtils;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
@@ -27,13 +29,14 @@ import org.elasticsearch.env.TestEnvironment;
 import org.elasticsearch.ingest.IngestStats;
 import org.elasticsearch.license.MockLicenseState;
 import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.test.MockUtils;
 import org.elasticsearch.threadpool.TestThreadPool;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xcontent.ToXContent;
 import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xcontent.XContentFactory;
-import org.elasticsearch.xpack.core.XPackFeatureSet;
+import org.elasticsearch.xpack.core.XPackFeatureUsage;
 import org.elasticsearch.xpack.core.XPackField;
 import org.elasticsearch.xpack.core.action.XPackUsageFeatureResponse;
 import org.elasticsearch.xpack.core.action.util.QueryPage;
@@ -45,6 +48,7 @@ import org.elasticsearch.xpack.core.ml.action.GetDatafeedsStatsAction;
 import org.elasticsearch.xpack.core.ml.action.GetJobsStatsAction;
 import org.elasticsearch.xpack.core.ml.action.GetTrainedModelsAction;
 import org.elasticsearch.xpack.core.ml.action.GetTrainedModelsStatsAction;
+import org.elasticsearch.xpack.core.ml.action.MlMemoryAction;
 import org.elasticsearch.xpack.core.ml.datafeed.DatafeedConfig;
 import org.elasticsearch.xpack.core.ml.datafeed.DatafeedState;
 import org.elasticsearch.xpack.core.ml.dataframe.DataFrameAnalyticsConfig;
@@ -60,6 +64,7 @@ import org.elasticsearch.xpack.core.ml.inference.assignment.Priority;
 import org.elasticsearch.xpack.core.ml.inference.trainedmodel.ClassificationConfig;
 import org.elasticsearch.xpack.core.ml.inference.trainedmodel.NerConfig;
 import org.elasticsearch.xpack.core.ml.inference.trainedmodel.RegressionConfig;
+import org.elasticsearch.xpack.core.ml.inference.trainedmodel.TextExpansionConfig;
 import org.elasticsearch.xpack.core.ml.inference.trainedmodel.TrainedModelSizeStats;
 import org.elasticsearch.xpack.core.ml.job.config.AnalysisConfig;
 import org.elasticsearch.xpack.core.ml.job.config.DataDescription;
@@ -132,6 +137,27 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
                 new QueryPage<>(Collections.emptyList(), 0, GetTrainedModelsStatsAction.Response.RESULTS_FIELD)
             )
         );
+        givenMlMemory(
+            new MlMemoryAction.Response(
+                new ClusterName("cluster_foo"),
+                List.of(
+                    new MlMemoryAction.Response.MlMemoryStats(
+                        mock(DiscoveryNode.class),
+                        ByteSizeValue.ofBytes(100L),
+                        ByteSizeValue.ofBytes(1L),
+                        ByteSizeValue.ofBytes(1L),
+                        ByteSizeValue.ofBytes(1L),
+                        ByteSizeValue.ofBytes(20L),
+                        ByteSizeValue.ofBytes(30L),
+                        ByteSizeValue.ofBytes(40L),
+                        ByteSizeValue.ofBytes(1L),
+                        ByteSizeValue.ofBytes(1L),
+                        ByteSizeValue.ofBytes(1L)
+                    )
+                ),
+                List.of()
+            )
+        );
     }
 
     @After
@@ -145,10 +171,12 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         boolean isDataFrameAnalyticsEnabled,
         boolean isNlpEnabled
     ) {
+        ThreadPool threadPool = mock(ThreadPool.class);
+        TransportService transportService = MockUtils.setupTransportServiceWithThreadpoolExecutor(threadPool);
         return new MachineLearningUsageTransportAction(
-            mock(TransportService.class),
+            transportService,
             clusterService,
-            mock(ThreadPool.class),
+            threadPool,
             mock(ActionFilters.class),
             mock(IndexNameExpressionResolver.class),
             TestEnvironment.newEnvironment(settings),
@@ -162,8 +190,9 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
     }
 
     public void testAvailable() throws Exception {
+        TransportService transportService = MockUtils.setupTransportServiceWithThreadpoolExecutor();
         MachineLearningInfoTransportAction featureSet = new MachineLearningInfoTransportAction(
-            mock(TransportService.class),
+            transportService,
             mock(ActionFilters.class),
             commonSettings,
             licenseState
@@ -174,12 +203,12 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         var usageAction = newUsageAction(commonSettings, randomBoolean(), randomBoolean(), randomBoolean());
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
         usageAction.masterOperation(null, null, ClusterState.EMPTY_STATE, future);
-        XPackFeatureSet.Usage usage = future.get().getUsage();
+        XPackFeatureUsage usage = future.get().getUsage();
         assertThat(usage.available(), is(available));
 
         BytesStreamOutput out = new BytesStreamOutput();
         usage.writeTo(out);
-        XPackFeatureSet.Usage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
+        XPackFeatureUsage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
         assertThat(serializedUsage.available(), is(available));
     }
 
@@ -191,9 +220,11 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
             enabled = randomBoolean();
             settings.put("xpack.ml.enabled", enabled);
         }
+
+        TransportService transportService = MockUtils.setupTransportServiceWithThreadpoolExecutor();
         boolean expected = enabled;
         MachineLearningInfoTransportAction featureSet = new MachineLearningInfoTransportAction(
-            mock(TransportService.class),
+            transportService,
             mock(ActionFilters.class),
             settings.build(),
             licenseState
@@ -202,12 +233,12 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         var usageAction = newUsageAction(settings.build(), randomBoolean(), randomBoolean(), randomBoolean());
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
         usageAction.masterOperation(null, null, ClusterState.EMPTY_STATE, future);
-        XPackFeatureSet.Usage usage = future.get().getUsage();
+        XPackFeatureUsage usage = future.get().getUsage();
         assertThat(usage.enabled(), is(expected));
 
         BytesStreamOutput out = new BytesStreamOutput();
         usage.writeTo(out);
-        XPackFeatureSet.Usage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
+        XPackFeatureUsage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
         assertThat(serializedUsage.enabled(), is(expected));
     }
 
@@ -223,13 +254,13 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         var usageAction = newUsageAction(settings.build(), true, true, true);
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
         usageAction.masterOperation(null, null, ClusterState.EMPTY_STATE, future);
-        XPackFeatureSet.Usage mlUsage = future.get().getUsage();
+        XPackFeatureUsage mlUsage = future.get().getUsage();
 
         BytesStreamOutput out = new BytesStreamOutput();
         mlUsage.writeTo(out);
-        XPackFeatureSet.Usage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
+        XPackFeatureUsage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
 
-        for (XPackFeatureSet.Usage usage : Arrays.asList(mlUsage, serializedUsage)) {
+        for (XPackFeatureUsage usage : Arrays.asList(mlUsage, serializedUsage)) {
             assertThat(usage, is(notNullValue()));
             assertThat(usage.name(), is(XPackField.MACHINE_LEARNING));
             assertThat(usage.enabled(), is(true));
@@ -330,16 +361,38 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
             assertThat(source.getValue("inference.ingest_processors._all.num_failures.min"), equalTo(100));
             assertThat(source.getValue("inference.ingest_processors._all.num_failures.max"), equalTo(500));
             assertThat(source.getValue("inference.deployments.count"), equalTo(2));
-            assertThat(source.getValue("inference.deployments.inference_counts.total"), equalTo(9.0));
-            assertThat(source.getValue("inference.deployments.inference_counts.min"), equalTo(4.0));
-            assertThat(source.getValue("inference.deployments.inference_counts.total"), equalTo(9.0));
+            assertThat(source.getValue("inference.deployments.inference_counts.total"), equalTo(12.0));
+            assertThat(source.getValue("inference.deployments.inference_counts.min"), equalTo(3.0));
             assertThat(source.getValue("inference.deployments.inference_counts.max"), equalTo(5.0));
-            assertThat(source.getValue("inference.deployments.inference_counts.avg"), equalTo(4.5));
+            assertThat(source.getValue("inference.deployments.inference_counts.avg"), equalTo(4.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.model_id"), equalTo("model_3"));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.task_type"), equalTo("ner"));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.num_allocations"), equalTo(8));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.num_threads"), equalTo(1));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.last_access"), equalTo(lastAccess(3).toString()));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.inference_counts.total"), equalTo(3.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.inference_counts.min"), equalTo(3.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.inference_counts.max"), equalTo(3.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.inference_counts.avg"), equalTo(3.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.model_id"), equalTo("model_4"));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.task_type"), equalTo("text_expansion"));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.num_allocations"), equalTo(2));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.num_threads"), equalTo(2));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.last_access"), equalTo(lastAccess(44).toString()));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.inference_counts.total"), equalTo(9.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.inference_counts.min"), equalTo(4.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.inference_counts.max"), equalTo(5.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.inference_counts.avg"), equalTo(4.5));
             assertThat(source.getValue("inference.deployments.model_sizes_bytes.total"), equalTo(1300.0));
             assertThat(source.getValue("inference.deployments.model_sizes_bytes.min"), equalTo(300.0));
             assertThat(source.getValue("inference.deployments.model_sizes_bytes.max"), equalTo(1000.0));
             assertThat(source.getValue("inference.deployments.model_sizes_bytes.avg"), equalTo(650.0));
-            assertThat(source.getValue("inference.deployments.time_ms.avg"), closeTo(45.55555555555556, 1e-10));
+            assertThat(source.getValue("inference.deployments.time_ms.avg"), closeTo(44.0, 1e-10));
+
+            assertThat(source.getValue("memory.anomaly_detectors_memory_bytes"), equalTo(20));
+            assertThat(source.getValue("memory.data_frame_analytics_memory_bytes"), equalTo(30));
+            assertThat(source.getValue("memory.pytorch_inference_memory_bytes"), equalTo(40));
+            assertThat(source.getValue("memory.total_used_memory_bytes"), equalTo(91));
         }
     }
 
@@ -359,13 +412,13 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         var usageAction = newUsageAction(settings.build(), false, true, true);
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
         usageAction.masterOperation(null, null, ClusterState.EMPTY_STATE, future);
-        XPackFeatureSet.Usage mlUsage = future.get().getUsage();
+        XPackFeatureUsage mlUsage = future.get().getUsage();
 
         BytesStreamOutput out = new BytesStreamOutput();
         mlUsage.writeTo(out);
-        XPackFeatureSet.Usage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
+        XPackFeatureUsage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
 
-        for (XPackFeatureSet.Usage usage : Arrays.asList(mlUsage, serializedUsage)) {
+        for (XPackFeatureUsage usage : Arrays.asList(mlUsage, serializedUsage)) {
             assertThat(usage, is(notNullValue()));
             assertThat(usage.name(), is(XPackField.MACHINE_LEARNING));
             assertThat(usage.enabled(), is(true));
@@ -415,16 +468,29 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
             assertThat(source.getValue("inference.ingest_processors._all.num_failures.min"), equalTo(100));
             assertThat(source.getValue("inference.ingest_processors._all.num_failures.max"), equalTo(500));
             assertThat(source.getValue("inference.deployments.count"), equalTo(2));
-            assertThat(source.getValue("inference.deployments.inference_counts.total"), equalTo(9.0));
-            assertThat(source.getValue("inference.deployments.inference_counts.min"), equalTo(4.0));
-            assertThat(source.getValue("inference.deployments.inference_counts.total"), equalTo(9.0));
+            assertThat(source.getValue("inference.deployments.inference_counts.total"), equalTo(12.0));
+            assertThat(source.getValue("inference.deployments.inference_counts.min"), equalTo(3.0));
             assertThat(source.getValue("inference.deployments.inference_counts.max"), equalTo(5.0));
-            assertThat(source.getValue("inference.deployments.inference_counts.avg"), equalTo(4.5));
+            assertThat(source.getValue("inference.deployments.inference_counts.avg"), equalTo(4.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.model_id"), equalTo("model_3"));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.task_type"), equalTo("ner"));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.last_access"), equalTo(lastAccess(3).toString()));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.inference_counts.total"), equalTo(3.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.inference_counts.min"), equalTo(3.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.inference_counts.max"), equalTo(3.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.0.inference_counts.avg"), equalTo(3.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.model_id"), equalTo("model_4"));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.task_type"), equalTo("text_expansion"));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.last_access"), equalTo(lastAccess(44).toString()));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.inference_counts.total"), equalTo(9.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.inference_counts.min"), equalTo(4.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.inference_counts.max"), equalTo(5.0));
+            assertThat(source.getValue("inference.deployments.stats_by_model.1.inference_counts.avg"), equalTo(4.5));
             assertThat(source.getValue("inference.deployments.model_sizes_bytes.total"), equalTo(1300.0));
             assertThat(source.getValue("inference.deployments.model_sizes_bytes.min"), equalTo(300.0));
             assertThat(source.getValue("inference.deployments.model_sizes_bytes.max"), equalTo(1000.0));
             assertThat(source.getValue("inference.deployments.model_sizes_bytes.avg"), equalTo(650.0));
-            assertThat(source.getValue("inference.deployments.time_ms.avg"), closeTo(45.55555555555556, 1e-10));
+            assertThat(source.getValue("inference.deployments.time_ms.avg"), closeTo(44.0, 1e-10));
         }
     }
 
@@ -442,13 +508,13 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         var usageAction = newUsageAction(settings.build(), true, false, false);
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
         usageAction.masterOperation(null, null, ClusterState.EMPTY_STATE, future);
-        XPackFeatureSet.Usage mlUsage = future.get().getUsage();
+        XPackFeatureUsage mlUsage = future.get().getUsage();
 
         BytesStreamOutput out = new BytesStreamOutput();
         mlUsage.writeTo(out);
-        XPackFeatureSet.Usage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
+        XPackFeatureUsage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
 
-        for (XPackFeatureSet.Usage usage : Arrays.asList(mlUsage, serializedUsage)) {
+        for (XPackFeatureUsage usage : Arrays.asList(mlUsage, serializedUsage)) {
             assertThat(usage, is(notNullValue()));
             assertThat(usage.name(), is(XPackField.MACHINE_LEARNING));
             assertThat(usage.enabled(), is(true));
@@ -533,11 +599,13 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         Job closed1 = buildJob("closed1", Arrays.asList(buildMinDetector("foo"), buildMinDetector("bar"), buildMinDetector("foobar")));
         GetJobsStatsAction.Response.JobStats closed1JobStats = buildJobStats("closed1", JobState.CLOSED, 300L, 0);
         givenJobs(Arrays.asList(opened1, closed1), Arrays.asList(opened1JobStats, opened2JobStats, closed1JobStats));
+        MlMemoryAction.Response memory = new MlMemoryAction.Response(new ClusterName("foo"), List.of(), List.of());
+        givenMlMemory(memory);
 
         var usageAction = newUsageAction(settings.build(), true, true, true);
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
         usageAction.masterOperation(null, null, ClusterState.EMPTY_STATE, future);
-        XPackFeatureSet.Usage usage = future.get().getUsage();
+        XPackFeatureUsage usage = future.get().getUsage();
 
         XContentSource source;
         try (XContentBuilder builder = XContentFactory.jsonBuilder()) {
@@ -557,6 +625,11 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         assertThat(source.getValue("jobs._all.model_size.avg"), equalTo(200.0));
         assertThat(source.getValue("jobs._all.created_by.a_cool_module"), equalTo(1));
         assertThat(source.getValue("jobs._all.created_by.unknown"), equalTo(1));
+
+        assertThat(source.getValue("memory.anomaly_detectors_memory_bytes"), equalTo(0));
+        assertThat(source.getValue("memory.data_frame_analytics_memory_bytes"), equalTo(0));
+        assertThat(source.getValue("memory.pytorch_inference_memory_bytes"), equalTo(0));
+        assertThat(source.getValue("memory.total_used_memory_bytes"), equalTo(0));
     }
 
     public void testUsageDisabledML() throws Exception {
@@ -567,12 +640,12 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         var usageAction = newUsageAction(settings.build(), randomBoolean(), randomBoolean(), randomBoolean());
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
         usageAction.masterOperation(null, null, ClusterState.EMPTY_STATE, future);
-        XPackFeatureSet.Usage mlUsage = future.get().getUsage();
+        XPackFeatureUsage mlUsage = future.get().getUsage();
         BytesStreamOutput out = new BytesStreamOutput();
         mlUsage.writeTo(out);
-        XPackFeatureSet.Usage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
+        XPackFeatureUsage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
 
-        for (XPackFeatureSet.Usage usage : Arrays.asList(mlUsage, serializedUsage)) {
+        for (XPackFeatureUsage usage : Arrays.asList(mlUsage, serializedUsage)) {
             assertThat(usage, is(notNullValue()));
             assertThat(usage.name(), is(XPackField.MACHINE_LEARNING));
             assertThat(usage.enabled(), is(false));
@@ -589,14 +662,14 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         var usageAction = newUsageAction(settings.build(), randomBoolean(), randomBoolean(), randomBoolean());
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
         usageAction.masterOperation(null, null, clusterState, future);
-        XPackFeatureSet.Usage usage = future.get().getUsage();
+        XPackFeatureUsage usage = future.get().getUsage();
 
         assertThat(usage.available(), is(true));
         assertThat(usage.enabled(), is(true));
 
         BytesStreamOutput out = new BytesStreamOutput();
         usage.writeTo(out);
-        XPackFeatureSet.Usage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
+        XPackFeatureUsage serializedUsage = new MachineLearningFeatureSetUsage(out.bytes().streamInput());
 
         XContentSource source;
         try (XContentBuilder builder = XContentFactory.jsonBuilder()) {
@@ -615,7 +688,7 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         var usageAction = newUsageAction(settings.build(), true, true, true);
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
         usageAction.masterOperation(null, null, ClusterState.EMPTY_STATE, future);
-        XPackFeatureSet.Usage usage = future.get().getUsage();
+        XPackFeatureUsage usage = future.get().getUsage();
 
         assertThat(usage.available(), is(true));
         assertThat(usage.enabled(), is(true));
@@ -769,6 +842,15 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
         }).when(client).execute(same(GetTrainedModelsStatsAction.INSTANCE), any(), any());
     }
 
+    private void givenMlMemory(MlMemoryAction.Response memoryUsage) {
+        doAnswer(invocationOnMock -> {
+            @SuppressWarnings("unchecked")
+            ActionListener<MlMemoryAction.Response> listener = (ActionListener<MlMemoryAction.Response>) invocationOnMock.getArguments()[2];
+            listener.onResponse(memoryUsage);
+            return Void.TYPE;
+        }).when(client).execute(same(MlMemoryAction.INSTANCE), any(), any());
+    }
+
     private static Detector buildMinDetector(String fieldName) {
         Detector.Builder detectorBuilder = new Detector.Builder();
         detectorBuilder.setFunction("min");
@@ -892,6 +974,7 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
             .setTags(Collections.singletonList("prepackaged"))
             .setModelSize(1000)
             .setEstimatedOperations(2000)
+            .setInferenceConfig(new TextExpansionConfig(null, null, null))
             .build();
         givenTrainedModels(Arrays.asList(trainedModel1, trainedModel2, trainedModel3, trainedModel4));
 
@@ -970,12 +1053,33 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
                             new AssignmentStats(
                                 "deployment_3",
                                 "model_3",
-                                null,
+                                1,
+                                8,
                                 null,
                                 null,
                                 null,
                                 Instant.now(),
-                                List.of(),
+                                List.of(
+                                    AssignmentStats.NodeStats.forStartedState(
+                                        DiscoveryNodeUtils.create("foo", new TransportAddress(TransportAddress.META_ADDRESS, 2)),
+                                        3,
+                                        41.0,
+                                        41.0,
+                                        0,
+                                        1,
+                                        3L,
+                                        2,
+                                        3,
+                                        lastAccess(3),
+                                        Instant.now(),
+                                        randomIntBetween(1, 16),
+                                        randomIntBetween(1, 16),
+                                        1L,
+                                        2L,
+                                        33.0,
+                                        1L
+                                    )
+                                ),
                                 Priority.NORMAL
                             ).setState(AssignmentState.STOPPING)
                         ),
@@ -1003,6 +1107,7 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
                                 "model_4",
                                 2,
                                 2,
+                                null,
                                 1000,
                                 ByteSizeValue.ofBytes(1000),
                                 Instant.now(),
@@ -1010,14 +1115,14 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
                                     AssignmentStats.NodeStats.forStartedState(
                                         DiscoveryNodeUtils.create("foo", new TransportAddress(TransportAddress.META_ADDRESS, 2)),
                                         5,
-                                        42.0,
-                                        42.0,
+                                        41.0,
+                                        41.0,
                                         0,
                                         1,
                                         3L,
                                         2,
                                         3,
-                                        Instant.now(),
+                                        lastAccess(4),
                                         Instant.now(),
                                         randomIntBetween(1, 16),
                                         randomIntBetween(1, 16),
@@ -1036,7 +1141,7 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
                                         1L,
                                         2,
                                         3,
-                                        Instant.now(),
+                                        lastAccess(44),
                                         Instant.now(),
                                         randomIntBetween(1, 16),
                                         randomIntBetween(1, 16),
@@ -1055,6 +1160,33 @@ public class MachineLearningInfoTransportActionTests extends ESTestCase {
                 )
             )
         );
+
+        givenMlMemory(
+            new MlMemoryAction.Response(
+                new ClusterName("cluster_foo"),
+                List.of(
+                    new MlMemoryAction.Response.MlMemoryStats(
+                        mock(DiscoveryNode.class),
+                        ByteSizeValue.ofBytes(100L),
+                        ByteSizeValue.ofBytes(1L),
+                        ByteSizeValue.ofBytes(1L),
+                        ByteSizeValue.ofBytes(1L),
+                        ByteSizeValue.ofBytes(20L),
+                        ByteSizeValue.ofBytes(30L),
+                        ByteSizeValue.ofBytes(40L),
+                        ByteSizeValue.ofBytes(1L),
+                        ByteSizeValue.ofBytes(1L),
+                        ByteSizeValue.ofBytes(1L)
+                    )
+                ),
+                List.of()
+            )
+        );
+
         return expectedDfaCountByAnalysis;
+    }
+
+    private static Instant lastAccess(int i) {
+        return Instant.ofEpochSecond(1_000_000_000 + i);
     }
 }

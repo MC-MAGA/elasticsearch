@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search.query;
@@ -16,7 +17,6 @@ import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.TotalHitCountCollector;
 
 import java.io.IOException;
-import java.util.Collection;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -79,45 +79,6 @@ class PartialHitCountCollector extends TotalHitCountCollector {
 
         boolean isThresholdReached() {
             return numCollected.getAcquire() >= totalHitsThreshold;
-        }
-    }
-
-    static class CollectorManager implements org.apache.lucene.search.CollectorManager<PartialHitCountCollector, Void> {
-        private final HitsThresholdChecker hitsThresholdChecker;
-        private boolean earlyTerminated;
-        private int totalHits;
-
-        CollectorManager(int totalHitsThreshold) {
-            this.hitsThresholdChecker = new HitsThresholdChecker(totalHitsThreshold);
-        }
-
-        CollectorManager(HitsThresholdChecker hitsThresholdChecker) {
-            this.hitsThresholdChecker = hitsThresholdChecker;
-        }
-
-        @Override
-        public PartialHitCountCollector newCollector() {
-            return new PartialHitCountCollector(hitsThresholdChecker);
-        }
-
-        @Override
-        public Void reduce(Collection<PartialHitCountCollector> collectors) throws IOException {
-            assert totalHits == 0;
-            for (PartialHitCountCollector collector : collectors) {
-                this.totalHits += collector.getTotalHits();
-                if (collector.hasEarlyTerminated()) {
-                    earlyTerminated = true;
-                }
-            }
-            return null;
-        }
-
-        public boolean hasEarlyTerminated() {
-            return earlyTerminated;
-        }
-
-        public int getTotalHits() {
-            return totalHits;
         }
     }
 }

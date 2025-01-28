@@ -1,17 +1,16 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster.node;
 
-import org.elasticsearch.Build;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.set.Sets;
-import org.elasticsearch.core.Booleans;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
@@ -27,19 +26,6 @@ import java.util.stream.Collectors;
  * Represents a node role.
  */
 public class DiscoveryNodeRole implements Comparable<DiscoveryNodeRole> {
-
-    /**
-     * A feature flag to indicate if serverless is available or not. Defaults to false.
-     */
-    private static final String USE_SERVERLESS_SYSTEM_PROPERTY = "es.serverless";
-    private static final Boolean USE_SERVERLESS_FEATURE_FLAG;
-    static {
-        final Boolean useStateless = Booleans.parseBoolean(System.getProperty(USE_SERVERLESS_SYSTEM_PROPERTY), false);
-        if (useStateless && Build.current().isSnapshot() == false) {
-            throw new IllegalArgumentException("Enabling serverless usage is only supported in snapshot builds");
-        }
-        USE_SERVERLESS_FEATURE_FLAG = useStateless;
-    }
 
     private final String roleName;
 
@@ -167,7 +153,7 @@ public class DiscoveryNodeRole implements Comparable<DiscoveryNodeRole> {
     /**
      * Represents the role for a content node.
      */
-    public static DiscoveryNodeRole DATA_CONTENT_NODE_ROLE = new DiscoveryNodeRole("data_content", "s", true) {
+    public static final DiscoveryNodeRole DATA_CONTENT_NODE_ROLE = new DiscoveryNodeRole("data_content", "s", true) {
 
         @Override
         public boolean isEnabledByDefault(final Settings settings) {
@@ -178,7 +164,7 @@ public class DiscoveryNodeRole implements Comparable<DiscoveryNodeRole> {
     /**
      * Represents the role for a hot node.
      */
-    public static DiscoveryNodeRole DATA_HOT_NODE_ROLE = new DiscoveryNodeRole("data_hot", "h", true) {
+    public static final DiscoveryNodeRole DATA_HOT_NODE_ROLE = new DiscoveryNodeRole("data_hot", "h", true) {
 
         @Override
         public boolean isEnabledByDefault(final Settings settings) {
@@ -189,7 +175,7 @@ public class DiscoveryNodeRole implements Comparable<DiscoveryNodeRole> {
     /**
      * Represents the role for a warm node.
      */
-    public static DiscoveryNodeRole DATA_WARM_NODE_ROLE = new DiscoveryNodeRole("data_warm", "w", true) {
+    public static final DiscoveryNodeRole DATA_WARM_NODE_ROLE = new DiscoveryNodeRole("data_warm", "w", true) {
 
         @Override
         public boolean isEnabledByDefault(final Settings settings) {
@@ -200,7 +186,7 @@ public class DiscoveryNodeRole implements Comparable<DiscoveryNodeRole> {
     /**
      * Represents the role for a cold node.
      */
-    public static DiscoveryNodeRole DATA_COLD_NODE_ROLE = new DiscoveryNodeRole("data_cold", "c", true) {
+    public static final DiscoveryNodeRole DATA_COLD_NODE_ROLE = new DiscoveryNodeRole("data_cold", "c", true) {
 
         @Override
         public boolean isEnabledByDefault(final Settings settings) {
@@ -211,7 +197,7 @@ public class DiscoveryNodeRole implements Comparable<DiscoveryNodeRole> {
     /**
      * Represents the role for a frozen node.
      */
-    public static DiscoveryNodeRole DATA_FROZEN_NODE_ROLE = new DiscoveryNodeRole("data_frozen", "f", true) {
+    public static final DiscoveryNodeRole DATA_FROZEN_NODE_ROLE = new DiscoveryNodeRole("data_frozen", "f", true) {
 
         @Override
         public boolean isEnabledByDefault(final Settings settings) {
@@ -370,9 +356,5 @@ public class DiscoveryNodeRole implements Comparable<DiscoveryNodeRole> {
      */
     public static DiscoveryNodeRole getRoleFromRoleName(final String roleName) {
         return maybeGetRoleFromRoleName(roleName).orElseThrow(() -> new IllegalArgumentException("unknown role [" + roleName + "]"));
-    }
-
-    public static boolean hasServerlessFeatureFlag() {
-        return USE_SERVERLESS_FEATURE_FLAG;
     }
 }

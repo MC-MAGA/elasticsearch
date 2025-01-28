@@ -2,11 +2,15 @@
 [[get-query-ruleset]]
 === Get query ruleset
 
-preview::[]
-
 ++++
 <titleabbrev>Get query ruleset</titleabbrev>
 ++++
+
+.New API reference
+[sidebar]
+--
+For the most up-to-date API details, refer to {api-es}/group/endpoint-query_rules[Query rules APIs].
+--
 
 Retrieves information about a query ruleset.
 
@@ -52,9 +56,9 @@ PUT _query_rules/my-ruleset
             "type": "pinned",
             "criteria": [
                 {
-                    "type": "exact",
+                    "type": "contains",
                     "metadata": "query_string",
-                    "values": [ "marvel" ]
+                    "values": [ "pugs", "puggles" ]
                 }
             ],
             "actions": {
@@ -69,9 +73,9 @@ PUT _query_rules/my-ruleset
             "type": "pinned",
             "criteria": [
                 {
-                    "type": "exact",
+                    "type": "fuzzy",
                     "metadata": "query_string",
-                    "values": [ "dc" ]
+                    "values": [ "rescue dogs" ]
                 }
             ],
             "actions": {
@@ -117,9 +121,9 @@ A sample response:
             "type": "pinned",
             "criteria": [
                 {
-                    "type": "exact",
+                    "type": "contains",
                     "metadata": "query_string",
-                    "values": [ "marvel" ]
+                    "values": [ "pugs", "puggles" ]
                 }
             ],
             "actions": {
@@ -134,9 +138,9 @@ A sample response:
             "type": "pinned",
             "criteria": [
                 {
-                    "type": "exact",
+                    "type": "fuzzy",
                     "metadata": "query_string",
-                    "values": [ "dc" ]
+                    "values": [ "rescue dogs" ]
                 }
             ],
             "actions": {

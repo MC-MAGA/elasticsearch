@@ -16,7 +16,7 @@ import java.io.IOException;
 /**
  * The Request to get the watcher stats
  */
-public class WatcherStatsRequest extends BaseNodesRequest<WatcherStatsRequest> {
+public class WatcherStatsRequest extends BaseNodesRequest {
 
     private boolean includeCurrentWatches;
     private boolean includeQueuedWatches;
@@ -24,13 +24,6 @@ public class WatcherStatsRequest extends BaseNodesRequest<WatcherStatsRequest> {
 
     public WatcherStatsRequest() {
         super((String[]) null);
-    }
-
-    public WatcherStatsRequest(StreamInput in) throws IOException {
-        super(in);
-        includeCurrentWatches = in.readBoolean();
-        includeQueuedWatches = in.readBoolean();
-        includeStats = in.readBoolean();
     }
 
     public boolean includeCurrentWatches() {
@@ -55,14 +48,6 @@ public class WatcherStatsRequest extends BaseNodesRequest<WatcherStatsRequest> {
 
     public void includeStats(boolean includeStats) {
         this.includeStats = includeStats;
-    }
-
-    @Override
-    public void writeTo(StreamOutput out) throws IOException {
-        super.writeTo(out);
-        out.writeBoolean(includeCurrentWatches);
-        out.writeBoolean(includeQueuedWatches);
-        out.writeBoolean(includeStats);
     }
 
     @Override

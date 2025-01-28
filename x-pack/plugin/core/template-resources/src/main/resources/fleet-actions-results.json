@@ -10,7 +10,8 @@
     },
     "mappings": {
       "_meta": {
-        "version": "${fleet.version}"
+        "version": "${fleet.version}",
+        "managed_index_mappings_version": ${fleet.managed.index.version}
       },
       "dynamic": false,
       "properties": {
@@ -52,6 +53,9 @@
         },
         "completed_at": {
           "type": "date"
+        },
+        "namespaces": {
+          "type": "keyword"
         }
       }
     }

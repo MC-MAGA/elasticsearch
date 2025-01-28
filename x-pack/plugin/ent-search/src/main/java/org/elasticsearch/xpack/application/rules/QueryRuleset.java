@@ -23,8 +23,10 @@ import org.elasticsearch.xcontent.XContentParserConfiguration;
 import org.elasticsearch.xcontent.XContentType;
 
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.elasticsearch.xcontent.ConstructingObjectParser.constructorArg;
 import static org.elasticsearch.xcontent.ConstructingObjectParser.optionalConstructorArg;
@@ -51,12 +53,14 @@ public class QueryRuleset implements Writeable, ToXContentObject {
         if (rules.isEmpty()) {
             throw new IllegalArgumentException("rules cannot be empty");
         }
-        this.rules = rules;
+        this.rules = rules.stream()
+            .sorted(Comparator.comparing(QueryRule::priority, Comparator.nullsLast(Comparator.naturalOrder())))
+            .collect(Collectors.toList());
     }
 
     public QueryRuleset(StreamInput in) throws IOException {
         this.id = in.readString();
-        this.rules = in.readList(QueryRule::new);
+        this.rules = in.readCollectionAsList(QueryRule::new);
     }
 
     private static final ConstructingObjectParser<QueryRuleset, String> PARSER = new ConstructingObjectParser<>(
@@ -133,7 +137,7 @@ public class QueryRuleset implements Writeable, ToXContentObject {
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         out.writeString(id);
-        out.writeList(rules);
+        out.writeCollection(rules);
     }
 
     public String id() {

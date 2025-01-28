@@ -1,11 +1,14 @@
 [[delete-synonyms-set]]
 === Delete synonyms set
-
-beta::[]
-
 ++++
 <titleabbrev>Delete synonyms set</titleabbrev>
 ++++
+
+.New API reference
+[sidebar]
+--
+For the most up-to-date API details, refer to {api-es}/group/endpoint-synonyms[Synonyms APIs].
+--
 
 Deletes a synonyms set.
 
@@ -166,12 +169,12 @@ DELETE _synonyms/my-synonyms-set
     "root_cause": [
       {
         "type": "illegal_argument_exception",
-        "reason": "Synonyms set [my-synonyms-set] cannot be deleted as it is used in the following indices: index-1, index-2",
+        "reason": "synonyms set [my-synonyms-set] cannot be deleted as it is used in the following indices: index-1, index-2",
         "stack_trace": ...
       }
     ],
     "type": "illegal_argument_exception",
-    "reason": "Synonyms set [my-synonyms-set] cannot be deleted as it is used in the following indices: index-1, index-2",
+    "reason": "synonyms set [my-synonyms-set] cannot be deleted as it is used in the following indices: index-1, index-2",
     "stack_trace": ...
   },
   "status": 400

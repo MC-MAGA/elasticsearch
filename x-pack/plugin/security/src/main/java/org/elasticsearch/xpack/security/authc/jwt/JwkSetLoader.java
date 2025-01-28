@@ -146,7 +146,7 @@ public class JwkSetLoader implements Releasable {
         assert newContentAndJwksAlgs != null;
         assert contentAndJwksAlgs != null;
         if ((Arrays.equals(contentAndJwksAlgs.sha256, newContentAndJwksAlgs.sha256)) == false) {
-            logger.debug(
+            logger.info(
                 "Reloaded JWK set from sha256=[{}] to sha256=[{}]",
                 MessageDigests.toHexString(contentAndJwksAlgs.sha256),
                 MessageDigests.toHexString(newContentAndJwksAlgs.sha256)
@@ -166,7 +166,7 @@ public class JwkSetLoader implements Releasable {
         );
         // Filter JWK(s) vs signature algorithms. Only keep JWKs with a matching alg. Only keep algs with a matching JWK.
         final JwksAlgs jwksAlgsPkc = JwkValidateUtil.filterJwksAndAlgorithms(jwksPkc, allowedJwksAlgsPkc);
-        logger.info(
+        logger.debug(
             "Usable PKC: JWKs=[{}] algorithms=[{}] sha256=[{}]",
             jwksAlgsPkc.jwks().size(),
             String.join(",", jwksAlgsPkc.algs()),

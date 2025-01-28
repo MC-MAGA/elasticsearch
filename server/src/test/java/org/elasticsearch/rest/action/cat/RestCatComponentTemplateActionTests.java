@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.rest.action.cat;
@@ -28,6 +29,7 @@ import org.elasticsearch.test.client.NoOpNodeClient;
 import org.elasticsearch.test.rest.FakeRestChannel;
 import org.elasticsearch.test.rest.FakeRestRequest;
 import org.elasticsearch.test.rest.RestActionTestCase;
+import org.elasticsearch.threadpool.ThreadPool;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -78,7 +80,8 @@ public class RestCatComponentTemplateActionTests extends RestActionTestCase {
         FakeRestChannel channel = new FakeRestChannel(getCatComponentTemplateRequest, true, 0);
 
         // execute action
-        try (NoOpNodeClient nodeClient = buildNodeClient()) {
+        try (var threadPool = createThreadPool()) {
+            final var nodeClient = buildNodeClient(threadPool);
             action.handleRequest(getCatComponentTemplateRequest, channel, nodeClient);
         }
 
@@ -96,7 +99,8 @@ public class RestCatComponentTemplateActionTests extends RestActionTestCase {
         FakeRestChannel channel = new FakeRestChannel(getCatComponentTemplateRequest, true, 0);
 
         // execute action
-        try (NoOpNodeClient nodeClient = buildNodeClient()) {
+        try (var threadPool = createThreadPool()) {
+            final var nodeClient = buildNodeClient(threadPool);
             action.handleRequest(getCatComponentTemplateRequest, channel, nodeClient);
         }
 
@@ -106,10 +110,10 @@ public class RestCatComponentTemplateActionTests extends RestActionTestCase {
         assertThat(channel.capturedResponse().content().utf8ToString(), emptyString());
     }
 
-    private NoOpNodeClient buildNodeClient() {
+    private NoOpNodeClient buildNodeClient(ThreadPool threadPool) {
         ClusterStateResponse clusterStateResponse = new ClusterStateResponse(clusterName, clusterState, false);
 
-        return new NoOpNodeClient(getTestName()) {
+        return new NoOpNodeClient(threadPool) {
             @Override
             @SuppressWarnings("unchecked")
             public <Request extends ActionRequest, Response extends ActionResponse> void doExecute(

@@ -1,15 +1,14 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster.routing.allocation;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.reroute.ClusterRerouteRequest;
@@ -34,8 +33,10 @@ import org.elasticsearch.cluster.routing.allocation.decider.ClusterRebalanceAllo
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.core.Strings;
 import org.elasticsearch.index.IndexVersion;
+import org.elasticsearch.index.IndexVersions;
 import org.elasticsearch.indices.cluster.ClusterStateChanges;
 import org.elasticsearch.test.VersionUtils;
+import org.elasticsearch.test.index.IndexVersionUtils;
 import org.elasticsearch.threadpool.TestThreadPool;
 import org.elasticsearch.threadpool.ThreadPool;
 
@@ -53,7 +54,6 @@ import static org.elasticsearch.cluster.routing.ShardRoutingState.STARTED;
 import static org.hamcrest.Matchers.equalTo;
 
 public class FailedNodeRoutingTests extends ESAllocationTestCase {
-    private final Logger logger = LogManager.getLogger(FailedNodeRoutingTests.class);
 
     public void testSimpleFailedNodeTest() {
         AllocationService strategy = createAllocationService(
@@ -124,13 +124,13 @@ public class FailedNodeRoutingTests extends ESAllocationTestCase {
         for (int i = 0; i < randomIntBetween(4, 8); i++) {
             DiscoveryNodes newNodes = DiscoveryNodes.builder(state.nodes()).add(createNode()).build();
             state = ClusterState.builder(state).nodes(newNodes).build();
-            state = cluster.reroute(state, new ClusterRerouteRequest()); // always reroute after adding node
+            // always reroute after adding node
+            state = cluster.reroute(state, new ClusterRerouteRequest(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT));
         }
 
         // Log the node versions (for debugging if necessary)
         for (DiscoveryNode discoveryNode : state.nodes().getDataNodes().values()) {
-            Version nodeVer = discoveryNode.getVersion();
-            logger.info("--> node [{}] has version [{}]", discoveryNode.getId(), nodeVer);
+            logger.info("--> node [{}] has version [{}]", discoveryNode.getId(), discoveryNode.getBuildVersion());
         }
 
         // randomly create some indices
@@ -224,7 +224,11 @@ public class FailedNodeRoutingTests extends ESAllocationTestCase {
         return DiscoveryNodeUtils.builder(id)
             .name(id)
             .roles(roles)
-            .version(VersionUtils.randomCompatibleVersion(random(), Version.CURRENT))
+            .version(
+                VersionUtils.randomCompatibleVersion(random(), Version.CURRENT),
+                IndexVersions.MINIMUM_COMPATIBLE,
+                IndexVersionUtils.randomCompatibleVersion(random())
+            )
             .build();
     }
 

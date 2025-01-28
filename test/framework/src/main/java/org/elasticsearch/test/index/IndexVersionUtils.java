@@ -1,15 +1,17 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.test.index;
 
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.index.IndexVersion;
+import org.elasticsearch.index.IndexVersions;
 import org.elasticsearch.index.KnownIndexVersions;
 import org.elasticsearch.test.ESTestCase;
 
@@ -22,15 +24,21 @@ import java.util.stream.Collectors;
 public class IndexVersionUtils {
 
     private static final List<IndexVersion> ALL_VERSIONS = KnownIndexVersions.ALL_VERSIONS;
+    private static final List<IndexVersion> ALL_WRITE_VERSIONS = KnownIndexVersions.ALL_WRITE_VERSIONS;
 
     /** Returns all released versions */
     public static List<IndexVersion> allReleasedVersions() {
         return ALL_VERSIONS;
     }
 
-    /** Returns the oldest known {@link IndexVersion} */
-    public static IndexVersion getFirstVersion() {
+    /** Returns the oldest known {@link IndexVersion}. This version can only be read from and not written to */
+    public static IndexVersion getLowestReadCompatibleVersion() {
         return ALL_VERSIONS.get(0);
+    }
+
+    /** Returns the oldest known {@link IndexVersion} that can be written to */
+    public static IndexVersion getLowestWriteCompatibleVersion() {
+        return ALL_WRITE_VERSIONS.get(0);
     }
 
     /** Returns a random {@link IndexVersion} from all available versions. */
@@ -38,14 +46,14 @@ public class IndexVersionUtils {
         return ESTestCase.randomFrom(ALL_VERSIONS);
     }
 
+    /** Returns a random {@link IndexVersion} from all versions that can be written to. */
+    public static IndexVersion randomWriteVersion() {
+        return ESTestCase.randomFrom(ALL_WRITE_VERSIONS);
+    }
+
     /** Returns a random {@link IndexVersion} from all available versions without the ignore set */
     public static IndexVersion randomVersion(Set<IndexVersion> ignore) {
         return ESTestCase.randomFrom(ALL_VERSIONS.stream().filter(v -> ignore.contains(v) == false).collect(Collectors.toList()));
-    }
-
-    /** Returns a random {@link IndexVersion} from all available versions. */
-    public static IndexVersion randomVersion(Random random) {
-        return ALL_VERSIONS.get(random.nextInt(ALL_VERSIONS.size()));
     }
 
     /** Returns a random {@link IndexVersion} between <code>minVersion</code> and <code>maxVersion</code> (inclusive). */
@@ -93,9 +101,7 @@ public class IndexVersionUtils {
     }
 
     public static IndexVersion getPreviousMajorVersion(IndexVersion version) {
-        int id = ((version.id() / 1_000_000) - 1) * 1_000_000;
-        if (id <= 8_000_000) id += 99;  // v8.0.0 and before had an extra 99 added to all numbers
-        return IndexVersion.fromId(id);
+        return IndexVersion.getMinimumCompatibleIndexVersion(version.id());
     }
 
     public static IndexVersion getNextVersion(IndexVersion version) {
@@ -116,11 +122,21 @@ public class IndexVersionUtils {
 
     /** Returns a random {@code IndexVersion} that is compatible with {@link IndexVersion#current()} */
     public static IndexVersion randomCompatibleVersion(Random random) {
-        return randomVersionBetween(random, IndexVersion.MINIMUM_COMPATIBLE, IndexVersion.current());
+        return randomVersionBetween(random, IndexVersions.MINIMUM_READONLY_COMPATIBLE, IndexVersion.current());
+    }
+
+    /** Returns a random {@code IndexVersion} that is compatible with {@link IndexVersion#current()} and can be written to */
+    public static IndexVersion randomCompatibleWriteVersion(Random random) {
+        return randomVersionBetween(random, IndexVersions.MINIMUM_COMPATIBLE, IndexVersion.current());
     }
 
     /** Returns a random {@code IndexVersion} that is compatible with the previous version to {@code version} */
     public static IndexVersion randomPreviousCompatibleVersion(Random random, IndexVersion version) {
-        return randomVersionBetween(random, IndexVersion.MINIMUM_COMPATIBLE, getPreviousVersion(version));
+        return randomVersionBetween(random, IndexVersions.MINIMUM_READONLY_COMPATIBLE, getPreviousVersion(version));
+    }
+
+    /** Returns a random {@code IndexVersion} that is compatible with the previous version to {@code version} and can be written to */
+    public static IndexVersion randomPreviousCompatibleWriteVersion(Random random, IndexVersion version) {
+        return randomVersionBetween(random, IndexVersions.MINIMUM_COMPATIBLE, getPreviousVersion(version));
     }
 }

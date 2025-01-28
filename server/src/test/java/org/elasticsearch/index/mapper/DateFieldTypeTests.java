@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.index.mapper;
 
@@ -18,12 +19,11 @@ import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.IndexOrDocValuesQuery;
-import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.IndexSortSortedNumericDocValuesRangeQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.store.Directory;
+import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
-import org.elasticsearch.common.settings.ClusterSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.time.DateFormatter;
 import org.elasticsearch.common.time.DateFormatters;
@@ -45,7 +45,6 @@ import org.elasticsearch.script.field.DateNanosDocValuesField;
 import org.elasticsearch.search.aggregations.support.CoreValuesSourceType;
 
 import java.io.IOException;
-import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Collections;
@@ -145,6 +144,46 @@ public class DateFieldTypeTests extends FieldTypeTestCase {
         assertEquals(Relation.INTERSECTS, ft.isFieldWithinQuery(reader, "2015-10-12", "2016-04-03", false, false, zone, null, context));
         assertEquals(Relation.INTERSECTS, ft.isFieldWithinQuery(reader, "2015-10-12", "2016-04-03", false, true, zone, null, context));
         assertEquals(Relation.INTERSECTS, ft.isFieldWithinQuery(reader, "2015-10-12", "2016-04-03", true, false, zone, null, context));
+        // Bad dates
+        assertThrows(
+            ElasticsearchParseException.class,
+            () -> ft.isFieldWithinQuery(reader, "2015-00-01", "2016-04-03", randomBoolean(), randomBoolean(), zone, null, context)
+        );
+        assertThrows(
+            ElasticsearchParseException.class,
+            () -> ft.isFieldWithinQuery(reader, "2015-01-01", "2016-04-00", randomBoolean(), randomBoolean(), zone, null, context)
+        );
+        assertThrows(
+            ElasticsearchParseException.class,
+            () -> ft.isFieldWithinQuery(reader, "2015-22-01", "2016-04-00", randomBoolean(), randomBoolean(), zone, null, context)
+        );
+        assertThrows(
+            ElasticsearchParseException.class,
+            () -> ft.isFieldWithinQuery(reader, "2015-01-01", "2016-04-45", randomBoolean(), randomBoolean(), zone, null, context)
+        );
+        assertThrows(
+            ElasticsearchParseException.class,
+            () -> ft.isFieldWithinQuery(reader, "2015-01-01", "2016-04-01T25:00:00", randomBoolean(), randomBoolean(), zone, null, context)
+        );
+        if (ft.resolution().equals(Resolution.NANOSECONDS)) {
+            assertThrows(
+                IllegalArgumentException.class,
+                () -> ft.isFieldWithinQuery(reader, "-2016-04-01", "2016-04-01", randomBoolean(), randomBoolean(), zone, null, context)
+            );
+            assertThrows(
+                IllegalArgumentException.class,
+                () -> ft.isFieldWithinQuery(
+                    reader,
+                    "9223372036854775807",
+                    "2016-04-01",
+                    randomBoolean(),
+                    randomBoolean(),
+                    zone,
+                    null,
+                    context
+                )
+            );
+        }
     }
 
     public void testValueFormat() {
@@ -210,7 +249,6 @@ public class DateFieldTypeTests extends FieldTypeTestCase {
             0,
             0,
             new IndexSettings(IndexMetadata.builder("foo").settings(indexSettings).build(), indexSettings),
-            ClusterSettings.createBuiltInClusterSettings(),
             null,
             null,
             null,
@@ -226,7 +264,8 @@ public class DateFieldTypeTests extends FieldTypeTestCase {
             null,
             () -> true,
             null,
-            Collections.emptyMap()
+            Collections.emptyMap(),
+            MapperMetrics.NOOP
         );
         MappedFieldType ft = new DateFieldType("field");
         String date1 = "2015-10-12T14:10:55";
@@ -237,16 +276,13 @@ public class DateFieldTypeTests extends FieldTypeTestCase {
             LongPoint.newRangeQuery("field", instant1, instant2),
             SortedNumericDocValuesField.newSlowRangeQuery("field", instant1, instant2)
         );
-        assertEquals(
-            expected,
-            ft.rangeQuery(date1, date2, true, true, null, null, null, context).rewrite(new IndexSearcher(new MultiReader()))
-        );
+        assertEquals(expected, ft.rangeQuery(date1, date2, true, true, null, null, null, context).rewrite(newSearcher(new MultiReader())));
 
         MappedFieldType ft2 = new DateFieldType("field", false);
         Query expected2 = SortedNumericDocValuesField.newSlowRangeQuery("field", instant1, instant2);
         assertEquals(
             expected2,
-            ft2.rangeQuery(date1, date2, true, true, null, null, null, context).rewrite(new IndexSearcher(new MultiReader()))
+            ft2.rangeQuery(date1, date2, true, true, null, null, null, context).rewrite(newSearcher(new MultiReader()))
         );
 
         instant1 = nowInMillis;
@@ -324,7 +360,8 @@ public class DateFieldTypeTests extends FieldTypeTestCase {
             "my_date",
             IndexNumericFieldData.NumericType.DATE_NANOSECONDS,
             CoreValuesSourceType.DATE,
-            DateNanosDocValuesField::new
+            DateNanosDocValuesField::new,
+            false
         );
         // Read index and check the doc values
         DirectoryReader reader = DirectoryReader.open(w);
@@ -337,10 +374,6 @@ public class DateFieldTypeTests extends FieldTypeTestCase {
         reader.close();
         w.close();
         dir.close();
-    }
-
-    private Instant instant(String str) {
-        return DateFormatters.from(DateFieldMapper.DEFAULT_DATE_TIME_FORMATTER.parse(str)).toInstant();
     }
 
     private static DateFieldType fieldType(Resolution resolution, String format, String nullValue) {

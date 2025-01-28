@@ -1,10 +1,10 @@
 setup:
-  - skip:
-      version: " - 8.9.99"
+  - requires:
+      cluster_features: ["gte_v8.10.0"]
       reason: Introduced in 8.10.0
   - do:
-      synonyms.put:
-        synonyms_set: test-synonyms
+      synonyms.put_synonym:
+        id: test-synonyms
         body:
           synonyms_set:
             - synonyms: "hello, hi"
@@ -14,13 +14,18 @@ setup:
             - synonyms: "test => check"
               id: "test-id-3"
 
+  # This is to ensure that all index shards (write and read) are available. In serverless this can take some time.
+  - do:
+      cluster.health:
+        index: .synonyms
+        wait_for_status: green
 
 ---
 "Update a synonyms rule":
   - do:
-      synonym_rule.put:
-        synonyms_set: "test-synonyms"
-        synonym_rule: "test-id-2"
+      synonyms.put_synonym_rule:
+        set_id: "test-synonyms"
+        rule_id: "test-id-2"
         body:
           synonyms: "bye, goodbye, seeya"
 
@@ -29,8 +34,8 @@ setup:
   - length: { reload_analyzers_details.reload_details: 0 }
 
   - do:
-      synonyms.get:
-        synonyms_set: test-synonyms
+      synonyms.get_synonym:
+        id: test-synonyms
 
   - match:
       synonyms_set:
@@ -45,9 +50,9 @@ setup:
 ---
 "Create a new synonym rule":
   - do:
-      synonym_rule.put:
-        synonyms_set: "test-synonyms"
-        synonym_rule: "test-id-0"
+      synonyms.put_synonym_rule:
+        set_id: "test-synonyms"
+        rule_id: "test-id-0"
         body:
           synonyms: "i-phone, iphone"
 
@@ -56,8 +61,8 @@ setup:
   - length: { reload_analyzers_details.reload_details: 0 }
 
   - do:
-      synonyms.get:
-        synonyms_set: test-synonyms
+      synonyms.get_synonym:
+        id: test-synonyms
 
   - match:
       synonyms_set:
@@ -75,8 +80,8 @@ setup:
 
   - do:
       catch: missing
-      synonym_rule.put:
-        synonyms_set: "test-synonyms-non-existent"
-        synonym_rule: "test-id-0"
+      synonyms.put_synonym_rule:
+        set_id: "test-synonyms-non-existent"
+        rule_id: "test-id-0"
         body:
           synonyms: "i-phone, iphone"

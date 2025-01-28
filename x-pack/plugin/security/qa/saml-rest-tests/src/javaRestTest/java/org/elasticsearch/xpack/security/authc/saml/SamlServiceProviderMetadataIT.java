@@ -20,6 +20,7 @@ import org.elasticsearch.core.PathUtils;
 import org.elasticsearch.http.PemHttpsConfigurator;
 import org.elasticsearch.mocksocket.MockHttpServer;
 import org.elasticsearch.test.cluster.ElasticsearchCluster;
+import org.elasticsearch.test.cluster.local.model.User;
 import org.elasticsearch.test.cluster.util.resource.Resource;
 import org.elasticsearch.test.junit.RunnableTestRuleAdapter;
 import org.elasticsearch.test.rest.ESRestTestCase;
@@ -106,8 +107,8 @@ public class SamlServiceProviderMetadataIT extends ESRestTestCase {
             .setting("xpack.security.transport.ssl.certificate_authorities", "ca.crt")
             .setting("xpack.security.transport.ssl.verification_mode", "certificate")
             .keystore("bootstrap.password", "x-pack-test-password")
-            .user("test_admin", "x-pack-test-password", "_es_test_root")
-            .user("rest_test", "rest_password")
+            .user("test_admin", "x-pack-test-password", User.ROOT_USER_ROLE, true)
+            .user("rest_test", "rest_password", User.ROOT_USER_ROLE, false)
             .configFile("node.key", Resource.fromClasspath("ssl/node.key"))
             .configFile("node.crt", Resource.fromClasspath("ssl/node.crt"))
             .configFile("ca.crt", Resource.fromClasspath("ssl/ca.crt"))
@@ -143,6 +144,7 @@ public class SamlServiceProviderMetadataIT extends ESRestTestCase {
             } else {
                 if (randomBoolean()) {
                     http.sendResponseHeaders(randomFrom(404, 401, 403, 500), 0);
+                    http.getResponseBody().close();
                 } else {
                     sendXmlContent("not valid xml", http);
                 }

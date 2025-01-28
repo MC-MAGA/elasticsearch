@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.mapper;
@@ -68,14 +69,14 @@ public class DateScriptFieldType extends AbstractScriptFieldType<DateFieldScript
             (n, c, o) -> o == null ? null : LocaleUtils.parse(o.toString()),
             RuntimeField.initializerNotSupported(),
             (b, n, v) -> {
-                if (v != null && false == v.equals(Locale.ROOT)) {
+                if (v != null && false == v.equals(DateFieldMapper.DEFAULT_LOCALE)) {
                     b.field(n, v.toString());
                 }
             },
             Object::toString
         ).acceptsNull();
 
-        Builder(String name) {
+        protected Builder(String name) {
             super(name, DateFieldScript.CONTEXT);
         }
 
@@ -87,7 +88,7 @@ public class DateScriptFieldType extends AbstractScriptFieldType<DateFieldScript
             return Collections.unmodifiableList(parameters);
         }
 
-        AbstractScriptFieldType<?> createFieldType(
+        protected AbstractScriptFieldType<?> createFieldType(
             String name,
             DateFieldScript.Factory factory,
             Script script,
@@ -96,13 +97,13 @@ public class DateScriptFieldType extends AbstractScriptFieldType<DateFieldScript
             OnScriptError onScriptError
         ) {
             String pattern = format.getValue() == null ? DateFieldMapper.DEFAULT_DATE_TIME_FORMATTER.pattern() : format.getValue();
-            Locale locale = this.locale.getValue() == null ? Locale.ROOT : this.locale.getValue();
+            Locale locale = this.locale.getValue() == null ? DateFieldMapper.DEFAULT_LOCALE : this.locale.getValue();
             DateFormatter dateTimeFormatter = DateFormatter.forPattern(pattern, supportedVersion).withLocale(locale);
             return new DateScriptFieldType(name, factory, dateTimeFormatter, script, meta, onScriptError);
         }
 
         @Override
-        AbstractScriptFieldType<?> createFieldType(
+        protected AbstractScriptFieldType<?> createFieldType(
             String name,
             DateFieldScript.Factory factory,
             Script script,
@@ -113,12 +114,14 @@ public class DateScriptFieldType extends AbstractScriptFieldType<DateFieldScript
         }
 
         @Override
-        DateFieldScript.Factory getParseFromSourceFactory() {
+        protected DateFieldScript.Factory getParseFromSourceFactory() {
             return DateFieldScript.PARSE_FROM_SOURCE;
         }
 
         @Override
-        DateFieldScript.Factory getCompositeLeafFactory(Function<SearchLookup, CompositeFieldScript.LeafFactory> parentScriptFactory) {
+        protected DateFieldScript.Factory getCompositeLeafFactory(
+            Function<SearchLookup, CompositeFieldScript.LeafFactory> parentScriptFactory
+        ) {
             return DateFieldScript.leafAdapter(parentScriptFactory);
         }
     }
@@ -175,6 +178,11 @@ public class DateScriptFieldType extends AbstractScriptFieldType<DateFieldScript
             timeZone = ZoneOffset.UTC;
         }
         return new DocValueFormat.DateTime(dateTimeFormatter, timeZone, Resolution.MILLISECONDS);
+    }
+
+    @Override
+    public BlockLoader blockLoader(BlockLoaderContext blContext) {
+        return new DateScriptBlockDocValuesReader.DateScriptBlockLoader(leafFactory(blContext.lookup()));
     }
 
     @Override

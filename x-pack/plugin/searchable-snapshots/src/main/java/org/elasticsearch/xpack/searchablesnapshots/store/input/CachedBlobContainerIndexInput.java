@@ -10,6 +10,7 @@ package org.elasticsearch.xpack.searchablesnapshots.store.input;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.ReadAdvice;
 import org.elasticsearch.blobcache.BlobCacheUtils;
 import org.elasticsearch.blobcache.common.ByteRange;
 import org.elasticsearch.index.snapshots.blobstore.BlobStoreIndexShardSnapshot.FileInfo;
@@ -20,7 +21,6 @@ import org.elasticsearch.xpack.searchablesnapshots.store.SearchableSnapshotDirec
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
-import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -36,7 +36,7 @@ public class CachedBlobContainerIndexInput extends MetadataCachingIndexInput {
      * a complete part of the {@link #fileInfo} at once in the cache and should not be
      * used for anything else than what the {@link #prefetchPart(int, Supplier)} method does.
      */
-    public static final IOContext CACHE_WARMING_CONTEXT = new IOContext();
+    public static final IOContext CACHE_WARMING_CONTEXT = new IOContext(IOContext.Context.DEFAULT, null, null, ReadAdvice.NORMAL);
 
     private static final Logger logger = LogManager.getLogger(CachedBlobContainerIndexInput.class);
 
@@ -118,8 +118,7 @@ public class CachedBlobContainerIndexInput extends MetadataCachingIndexInput {
         assert rangeToRead.isSubRangeOf(rangeToWrite) : rangeToRead + " vs " + rangeToWrite;
         assert rangeToRead.length() == b.remaining() : b.remaining() + " vs " + rangeToRead;
 
-        final Future<Integer> populateCacheFuture = populateAndRead(b, position, length, cacheFile, rangeToWrite);
-        final int bytesRead = populateCacheFuture.get();
+        final int bytesRead = populateAndRead(b, position, cacheFile, rangeToWrite).get();
         assert bytesRead == length : bytesRead + " vs " + length;
     }
 
@@ -191,7 +190,7 @@ public class CachedBlobContainerIndexInput extends MetadataCachingIndexInput {
                     if (isCancelled.get()) {
                         return -1L;
                     }
-                    final int bytesRead = readSafe(input, copyBuffer, range.start(), remainingBytes, cacheFileReference);
+                    final int bytesRead = readSafe(input, copyBuffer, range.start(), remainingBytes);
                     // The range to prewarm in cache
                     final long readStart = range.start() + totalBytesRead;
                     final ByteRange rangeToWrite = ByteRange.of(readStart, readStart + bytesRead);
